@@ -1,7 +1,7 @@
 {
-  "name": "dexorium",
+  "name": "dexorium-v3-16-vercel",
   "private": true,
-  "version": "3.21.0",
+  "version": "3.22.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"vite --host 0.0.0.0\" \"node server/server.js\"",

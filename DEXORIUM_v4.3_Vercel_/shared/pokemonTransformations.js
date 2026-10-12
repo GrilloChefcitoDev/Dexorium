@@ -304,7 +304,7 @@ export function consumeTeamTransformationResource(method, usage = {}) {
 }
 
 export function getTransformationOptions(pokemon, team = [], teamUsage = null) {
-  if (pokemon?.transformed || pokemon?.transformationUsed || Number(pokemon?.formId) >= 10000) return [];
+  if (pokemon?.transformed || pokemon?.transformationUsed || pokemon?.teraType || Number(pokemon?.formId) >= 10000) return [];
   const baseId = canonicalBaseId(pokemon);
   if (!baseId || baseId === ASH_GRENINJA_ID) return [];
 

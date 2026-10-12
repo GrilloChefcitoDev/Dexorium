@@ -3,11 +3,11 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'node:http';
 import crypto from 'node:crypto';
 import { getTypeMultiplier, getEffectivenessLabel, pokemonToCard, MAX_ENERGY, ENERGY_REGEN_PER_TURN, recoverEnergy } from '../shared/cardRules.js';
-import { findTransformationOption, applyTransformationToCard, getTransformationFamilyIds, getSpecialKoTransformation, getHpTriggeredTransformation, getPowerConstructTransformation, consumeTeamTransformationResource } from '../shared/pokemonTransformations.js';
+import { findTransformationOption, applyTransformationToCard, getSpecialKoTransformation, getHpTriggeredTransformation, getPowerConstructTransformation, consumeTeamTransformationResource } from '../shared/pokemonTransformations.js';
 import { normalizeTeamIds, validateChatMessage } from '../shared/partialRules.js';
 import { makeServerOfflinePokemon } from '../shared/offlinePokemon.js';
-import { createRematchRequest, validateRematchDecision, cancelRematchRequest } from '../shared/rematchRules.js';
-import { validateTargetForAction } from '../shared/combatTargets.js';
+import { createRematchRequest, validateRematchDecision, cancelRematchRequest, getPokemonIdsBlockedAfterFaint } from '../shared/rematchRules.js';
+import { validateTargetForAction, getResolvedTargetPokemon } from '../shared/combatTargets.js';
 
 const HOST = '0.0.0.0';
 const PORT = Number(process.env.PORT || 8080);
@@ -369,6 +369,17 @@ function triggerHpBasedTransformations(room) {
   }
 }
 
+function blockPokemonForRematch(room, player, pokemon) {
+  const idsToBlock = getPokemonIdsBlockedAfterFaint(pokemon);
+  const newlyBlocked = idsToBlock.filter((id) => !(player.blockedIds || []).includes(id));
+  if (!newlyBlocked.length) return;
+
+  player.blockedIds = [...new Set([...(player.blockedIds || []), ...newlyBlocked])];
+  const hasOtherForms = newlyBlocked.some((id) => Number(id) !== Number(pokemon.id));
+  const explanation = hasOtherForms ? ' y sus formas asociadas' : '';
+  addLog(room, `${pokemon.name}${explanation} quedó bloqueado${hasOtherForms ? 's' : ''} para ${player.name} porque llegó a 0 PS.`, 'system', player.name, player.side);
+}
+
 function markFainted(room) {
   const newlyFainted = [];
 
@@ -385,22 +396,9 @@ function markFainted(room) {
     }
   }
 
-  // Si los dos bandos pierden un Pokémon en la misma resolución del turno,
-  // ese intercambio cuenta como empate para los bloqueos. No se bloquea a
-  // ninguno de los Pokémon caídos en ese intercambio.
-  const sidesWithFaints = new Set(newlyFainted.map(({ player }) => player.side));
-  const simultaneousDraw = sidesWithFaints.has('A') && sidesWithFaints.has('B');
-  if (!simultaneousDraw) {
-    for (const { player, pokemon } of newlyFainted) {
-      const family = getTransformationFamilyIds(pokemon.baseId || pokemon.id);
-      const directAlternateForm = Number(pokemon.id) >= 10000 && family.length > 1;
-      const idsToBlock = pokemon.transformed || pokemon.transformationUsed || directAlternateForm ? family : [pokemon.id];
-      const newlyBlocked = idsToBlock.map(Number).filter((id) => Number.isSafeInteger(id) && !player.blockedIds.includes(id));
-      if (newlyBlocked.length) {
-        player.blockedIds.push(...newlyBlocked);
-        addLog(room, `${pokemon.name} y sus formas asociadas quedan bloqueados para ${player.name} en las próximas revanchas.`, 'system', player.name, player.side);
-      }
-    }
+  // Cada Pokémon que llega a 0 PS se bloquea, incluso si ambos bandos pierden uno en el mismo turno.
+  for (const { player, pokemon } of newlyFainted) {
+    blockPokemonForRematch(room, player, pokemon);
   }
 }
 
@@ -427,9 +425,7 @@ function applyBattleTransformation(room, player, pokemon, key, automaticReason =
   }
   room.transformationUsage[player.side] = usage;
 
-  const familyIds = option.familyIds || getTransformationFamilyIds(pokemon.baseId || pokemon.id);
-  player.blockedIds = [...new Set([...(player.blockedIds || []), ...familyIds.map(Number)])];
-  addLog(room, `${player.name} transformó a ${transformed.baseName || pokemon.name} en ${option.label}${automaticReason ? ` ${automaticReason}` : ''}. No podrá cambiar de forma durante este combate.`, 'transformation', player.name, player.side);
+  addLog(room, `${player.name} transformó a ${transformed.baseName || pokemon.name} en ${option.label}${automaticReason ? ` ${automaticReason}` : ''}. No podrá usar otra mecánica especial con este Pokémon durante el combate.`, 'transformation', player.name, player.side);
   addEffect(room, {
     kind: 'transform', side: player.side, icon: option.method === 'mega' ? '💎' : option.method === 'dynamax' || option.method === 'gigantamax' ? '🔴' : '✨',
     pokemonId: transformed.id, method: option.method, transformationKey: option.key, automatic: Boolean(automaticReason),
@@ -464,9 +460,12 @@ function resolveAction(room, player, packet) {
     const type = String(packet.teraType || '').toLowerCase();
     const validTypes = new Set(['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy']);
     if (!validTypes.has(type) || room.teraUsage?.[player.side] || actor.teraType) throw new Error('La teracristalización ya fue usada o el tipo no es válido.');
+    if (actor.transformed || actor.transformationUsed) throw new Error('Este Pokémon ya usó otra mecánica especial en este combate.');
     actor.originalTypes = [...(actor.originalTypes || actor.types || [])];
     actor.types = [type];
     actor.teraType = type;
+    actor.teraUsed = true;
+    actor.transformationUsed = true;
     actor.actions.teraStrike = {
       id: 'attack',
       name: `Tera Golpe ${type[0].toUpperCase()}${type.slice(1)}`,
@@ -499,7 +498,11 @@ function resolveAction(room, player, packet) {
   const hasExplicitTarget = packet.targetPlayerId != null && packet.targetPokemonId != null;
   if (action.id === 'attack' || (['heal', 'defend'].includes(action.id) && hasExplicitTarget)) {
     targetPlayer = findPlayerById(room, packet.targetPlayerId);
-    target = targetPlayer ? findPokemon(targetPlayer, packet.targetPokemonId) : null;
+    const selectedTarget = targetPlayer ? findPokemon(targetPlayer, packet.targetPokemonId) : null;
+
+    // El Pokémon objetivo puede cambiar mientras se eligen las jugadas.
+    // Los ataques siempre buscan al Pokémon que esté activo al aplicar el daño.
+    target = getResolvedTargetPokemon(action.id, targetPlayer, selectedTarget);
     validateTargetForAction(action.id, player, targetPlayer, target);
   }
 
@@ -583,9 +586,31 @@ function resolveTurn(room) {
     addLog(room, `Turno ${room.turn}: ${choiceText}.`, 'choice', player.name, player.side);
   }
 
-  // Después se resuelven en orden de velocidad, respetando el funcionamiento
-  // actual del combate y evitando ejecutar una acción inválida.
+  // Primero se aplican todos los cambios de Pokémon.
+  // Así, los ataques de este turno golpean al Pokémon que acaba de entrar,
+  // sin importar cuál de los dos jugadores envió su acción primero.
   for (const packet of packets) {
+    if (packet.action !== 'switch') continue;
+
+    const player = room.players.get(packet.playerId);
+    if (!player?.activeId || room.waitingForSwitch.has(player.id)) continue;
+
+    const outgoing = findPokemon(player, player.activeId);
+    const incoming = findPokemon(player, packet.switchPokemonId);
+    if (!outgoing || outgoing.currentHp <= 0 || !incoming || incoming.currentHp <= 0) continue;
+    if (Number(packet.pokemonId) !== Number(outgoing.id) || Number(incoming.id) === Number(outgoing.id)) continue;
+
+    player.activeId = incoming.id;
+    player.lastActiveId = incoming.id;
+    addLog(room, `cambio de ${outgoing.name} a ${incoming.name}.`, 'event', player.name, player.side);
+    addEffect(room, { kind: 'switch', side: player.side, icon: '✨', pokemonId: incoming.id });
+  }
+
+  // Después se resuelven las acciones restantes en orden de velocidad.
+  for (const packet of packets) {
+    // El cambio ya se aplicó en el bloque anterior, así que no debe ejecutarse dos veces.
+    if (packet.action === 'switch') continue;
+
     const player = room.players.get(packet.playerId);
     if (!player?.activeId || room.waitingForSwitch.has(player.id)) continue;
     const active = findPokemon(player, player.activeId);
@@ -997,7 +1022,10 @@ async function handleMessage(client, rawMessage) {
       addLog(room, `${player.name} se rindió. El equipo ${losingSide} pierde el combate.`, 'system', player.name, player.side);
       for (const teammate of room.players.values()) {
         if (teammate.side !== losingSide) continue;
-        teammate.team.forEach((pokemon) => { pokemon.currentHp = 0; });
+        teammate.team.forEach((pokemon) => {
+          pokemon.currentHp = 0;
+          blockPokemonForRematch(room, teammate, pokemon);
+        });
         teammate.lastActiveId = teammate.activeId || teammate.lastActiveId || teammate.team[0]?.id || null;
         teammate.activeId = null;
         room.pendingActions.delete(teammate.id);
@@ -1036,6 +1064,7 @@ async function handleMessage(client, rawMessage) {
         const validTypes = new Set(['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy']);
         if (!validTypes.has(String(message.teraType || '').toLowerCase())) throw new Error('El tipo Tera seleccionado no es válido.');
         if (room.teraUsage?.[player.side] || active.teraType) throw new Error('Tu equipo ya usó la teracristalización en este combate.');
+        if (active.transformed || active.transformationUsed) throw new Error('Este Pokémon ya usó otra mecánica especial en este combate.');
       } else {
         const action = active.actions[message.action];
         if (!action) throw new Error('La acción no existe.');

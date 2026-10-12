@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getPokemon } from '../services/pokeApi';
 import { useArenaAudio } from '../audio/AudioManager';
 
-export default function PokedexIntro({ onContinue, onPokemonCry }) {
+export default function PokedexIntro({ onContinue, onOpenGuide, onPokemonCry }) {
   const audio = useArenaAudio();
   const playCry = onPokemonCry || audio.playPokemonCry;
   const [pokemon, setPokemon] = useState(null);
@@ -54,9 +54,14 @@ export default function PokedexIntro({ onContinue, onPokemonCry }) {
         <p>
           Consulta un Pokémon en la consola y arma tu equipo para entrar a una batalla por turnos.
         </p>
-        <button className="primary-button arena-entry-button intro-entry-button" type="button" onClick={onContinue}>
-          Entrar a la Arena <span aria-hidden="true">→</span>
-        </button>
+        <div className="intro-entry-actions">
+          <button className="primary-button arena-entry-button intro-entry-button" type="button" onClick={onContinue}>
+            Entrar a la Arena <span aria-hidden="true">→</span>
+          </button>
+          <button className="secondary-button intro-guide-button" type="button" onClick={onOpenGuide}>
+            📘 Leer cómo jugar
+          </button>
+        </div>
       </div>
 
       <div className="pokedex-3d is-open" aria-label="Pokédex interactiva">

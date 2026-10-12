@@ -183,7 +183,7 @@ export default function TeamBuilder({ catalog, selectedTeam, onSelect, onRemove,
                   <div className="dex-grid-image"><img src={catalog.offline || entry.offlineGenerated ? '/pokemon-placeholder.svg' : `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${getIdFromEntry(entry) || ''}.png`} alt={entry.name} loading="lazy" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = '/pokemon-placeholder.svg'; }} /></div>
                   <strong>{prettyName(entry.name)}</strong>
                   {isSelected(getIdFromEntry(entry)) && <span className="selected-tag">EN EQUIPO</span>}
-                  {blockedIds.includes(getIdFromEntry(entry)) && <span className="selected-tag">Bloqueada: perdió una ronda</span>}
+                  {blockedIds.includes(getIdFromEntry(entry)) && <span className="selected-tag">Bloqueado para revancha (0 PS)</span>}
                 </button>
               ))}
             </div>
@@ -235,7 +235,7 @@ export default function TeamBuilder({ catalog, selectedTeam, onSelect, onRemove,
               </div>
 
               <button className="primary-button wide" type="button" disabled={isSelected(inspectedPokemon.id) || selectedTeam.length >= 6 || blockedIds.includes(Number(inspectedPokemon.id))} onClick={() => onSelect(inspectedPokemon.id)}>
-                {blockedIds.includes(Number(inspectedPokemon.id)) ? 'Bloqueada: perdió una ronda' : isSelected(inspectedPokemon.id) ? 'Ya está en tu equipo' : selectedTeam.length >= 6 ? 'Equipo completo' : 'Añadir al equipo'}
+                {blockedIds.includes(Number(inspectedPokemon.id)) ? 'Bloqueado para revancha (0 PS)' : isSelected(inspectedPokemon.id) ? 'Ya está en tu equipo' : selectedTeam.length >= 6 ? 'Equipo completo' : 'Añadir al equipo'}
               </button>
             </>
           )}

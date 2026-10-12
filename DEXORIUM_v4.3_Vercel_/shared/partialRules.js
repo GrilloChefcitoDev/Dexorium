@@ -19,7 +19,7 @@ export function normalizeTeamIds(teamIds, blockedIds = [], expectedSize = PARTIA
   const blocked = new Set((Array.isArray(blockedIds) ? blockedIds : []).map(Number));
   const blockedId = normalizedIds.find((id) => blocked.has(id));
   if (blockedId !== undefined) {
-    throw new Error(`El Pokémon con ID ${blockedId} está bloqueado porque perdió una ronda.`);
+    throw new Error(`El Pokémon con ID ${blockedId} está bloqueado para la revancha porque llegó a 0 PS.`);
   }
 
   return normalizedIds;

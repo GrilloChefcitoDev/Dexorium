@@ -1,6 +1,7 @@
 // src/App.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import PokedexIntro from './components/PokedexIntro';
+import HowToPlay from './components/HowToPlay';
 import TeamBuilder from './components/TeamBuilder';
 import { getPokemon, getPokemonCatalog, getPokemonTeam } from './services/pokeApi';
 import { pokemonToCard, getEffectivenessLabel, getTypeMultiplier, MAX_ENERGY } from '../shared/cardRules';
@@ -9,8 +10,35 @@ import { getPlayerSessionId, useGameSocket } from './network/useGameSocket';
 import { POKEMON_EMOJIS } from './data/pokemonEmojis';
 import { AudioProvider, useArenaAudio } from './audio/AudioManager';
 import { chooseUniquePokemonIds, recordMatchResultOnce, validateChatMessage } from '../shared/partialRules.js';
+import { getFaintedPokemonCount, getWinnerTrainerLabel } from '../shared/spectatorScore.js';
+import { getHealthBarClass } from '../shared/healthBar.js';
 
 const STATS_STORAGE_KEY = 'pokemon-arena-results';
+
+const HOTKEY_STORAGE_KEY = 'dexorium-combat-hotkeys';
+const DEFAULT_COMBAT_HOTKEYS = { attack: 'z', teraStrike: 'b', defend: 'c', heal: 'x', recover: 'r', switch: 'v', transform: 't', tera: 'g' };
+const HOTKEY_ACTIONS = [
+  ['attack', 'Atacar', '⚔', 'Realiza el movimiento principal'],
+  ['teraStrike', 'Tera Golpe', '✦', 'Usa el movimiento del tipo Tera'],
+  ['defend', 'Defender', '◇', 'Protege al objetivo aliado'],
+  ['heal', 'Curar', '＋', 'Recupera vida a un aliado'],
+  ['recover', 'Recargar energía', 'ϟ', 'Recupera energía'],
+  ['switch', 'Cambiar Pokémon', '↔', 'Abre la lista de cambios'],
+  ['transform', 'Transformación', '◆', 'Abre las formas disponibles'],
+  ['tera', 'Teracristalizar', '✧', 'Abre el selector de tipo Tera'],
+];
+
+// Lee los atajos guardados y evita que una configuración vieja asigne dos acciones a la misma tecla.
+function readCombatHotkeys() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOTKEY_STORAGE_KEY) || '{}');
+    const merged = { ...DEFAULT_COMBAT_HOTKEYS, ...saved };
+    const normalized = Object.values(merged).map((key) => String(key).toLowerCase());
+    return new Set(normalized).size === normalized.length ? merged : DEFAULT_COMBAT_HOTKEYS;
+  } catch {
+    return DEFAULT_COMBAT_HOTKEYS;
+  }
+}
 
 // Actividad 1: Cargar y guardar resultados en localStorage
 function loadSavedStats() {
@@ -77,7 +105,7 @@ function TeamPanel({ team, blockedIds = [], showBlocked = false }) {
               {pokemon.transformation?.label && <small className="mini-transformation-label">{pokemon.transformation.label}</small>}
               {isBlockedForRematch && <small className="team-blocked-tag">Bloqueado para revancha</small>}
               <div className="hp-track">
-                <span style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} />
+                <span className={getHealthBarClass(pokemon.currentHp, pokemon.battleStats.hp)} style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} />
               </div>
               <small>{Math.max(0, pokemon.currentHp)} / {pokemon.battleStats.hp}</small>
             </div>
@@ -419,6 +447,81 @@ function ChatWindow({ room, send }) {
 }
 
 
+// Los atajos se pueden preparar antes de entrar al combate; quedan guardados en este navegador.
+function HotkeySettingsModal({ onClose }) {
+  const [hotkeys, setHotkeys] = useState(readCombatHotkeys);
+  const [capturing, setCapturing] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (capturing) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === 'Escape') {
+          setCapturing('');
+          setMessage('Cambio cancelado.');
+          return;
+        }
+        if (event.key.length !== 1 || event.key === ' ') {
+          setMessage('Elige una letra o número para que el atajo sea fácil de usar.');
+          return;
+        }
+        const nextKey = event.key.toLowerCase();
+        const conflict = Object.entries(hotkeys).find(([action, bound]) => action !== capturing && String(bound).toLowerCase() === nextKey);
+        if (conflict) {
+          const actionLabel = HOTKEY_ACTIONS.find(([key]) => key === conflict[0])?.[1] || conflict[0];
+          setMessage(`La tecla ${nextKey.toUpperCase()} ya está asignada a “${actionLabel}”.`);
+          return;
+        }
+        const next = { ...hotkeys, [capturing]: nextKey };
+        setHotkeys(next);
+        try { localStorage.setItem(HOTKEY_STORAGE_KEY, JSON.stringify(next)); } catch { /* Se mantiene durante esta sesión. */ }
+        setCapturing('');
+        setMessage('Atajo guardado.');
+        return;
+      }
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [capturing, hotkeys, onClose]);
+
+  function resetHotkeys() {
+    setHotkeys(DEFAULT_COMBAT_HOTKEYS);
+    setCapturing('');
+    setMessage('Atajos originales restaurados.');
+    try { localStorage.setItem(HOTKEY_STORAGE_KEY, JSON.stringify(DEFAULT_COMBAT_HOTKEYS)); } catch { /* Se conserva para esta sesión. */ }
+  }
+
+  return (
+    <div className="hotkey-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !capturing) onClose(); }}>
+      <section className="hotkey-modal" role="dialog" aria-modal="true" aria-labelledby="global-hotkeys-title">
+        <header className="hotkey-modal-heading">
+          <span className="hotkey-modal-mark" aria-hidden="true">⌨</span>
+          <div><p className="eyebrow">CONTROLES PERSONALES</p><h2 id="global-hotkeys-title">Configurar teclas</h2><p>Elige los atajos con calma antes de empezar la pelea. Se guardan en este navegador.</p></div>
+          <button type="button" className="hotkey-modal-close" onClick={onClose} aria-label="Cerrar configuración">×</button>
+        </header>
+        <div className="hotkey-modal-grid">
+          {HOTKEY_ACTIONS.map(([key, label, icon, description]) => (
+            <article className={`hotkey-config-card ${capturing === key ? 'is-listening' : ''}`} key={key}>
+              <span className="hotkey-config-icon" aria-hidden="true">{icon}</span>
+              <div className="hotkey-config-copy"><strong>{label}</strong><small>{description}</small></div>
+              <button type="button" className="hotkey-config-key" onClick={() => { setCapturing(key); setMessage(`Pulsa la tecla para “${label}”. Esc cancela.`); }} aria-label={`Cambiar tecla de ${label}`}>
+                {capturing === key ? 'Pulsa…' : <kbd>{String(hotkeys[key] || DEFAULT_COMBAT_HOTKEYS[key]).toUpperCase()}</kbd>}
+              </button>
+            </article>
+          ))}
+        </div>
+        <footer className="hotkey-modal-footer">
+          <span role="status" aria-live="polite">{message || 'No se permiten dos acciones con la misma tecla.'}</span>
+          <div><button type="button" className="hotkey-reset" onClick={resetHotkeys}>Restablecer</button><button type="button" className="primary-button" onClick={onClose}>Listo</button></div>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 // Actividad 1: Panel de Resultados
 function ResultsPanel({ stats, onClose }) {
   useEffect(() => {
@@ -446,7 +549,7 @@ function ResultsPanel({ stats, onClose }) {
   );
 }
 
-function RoomLobby({ playerName, setPlayerName, selectedTeam, rooms, onCreate, onJoin, onSpectate, onRefresh, currentRoom, onLeave, socketConnected, onOpenStats, blockedIds, send }) {
+function RoomLobby({ playerName, setPlayerName, selectedTeam, rooms, onCreate, onJoin, onSpectate, onRefresh, currentRoom, onLeave, socketConnected, onOpenStats, onOpenGuide, blockedIds, send }) {
   const [mode, setMode] = useState('solo');
   const [visibility, setVisibility] = useState('public');
   const [password, setPassword] = useState('');
@@ -560,6 +663,16 @@ function RoomLobby({ playerName, setPlayerName, selectedTeam, rooms, onCreate, o
           <button className="primary-button wide" type="button" onClick={() => onJoin({ code: roomCode, password: joinPassword, side, name: playerName })} disabled={!playerName.trim() || !roomCode || !socketConnected || selectedTeam.length !== 6}>Entrar a la sala</button>
         </section>
       </div>
+
+      <div className="rooms-guide-row">
+        <div>
+          <strong>¿Primera vez en DEXORIUM?</strong>
+          <p>Consulta cómo crear una sala, elegir equipo y jugar tu primer combate.</p>
+        </div>
+        <button className="secondary-button rooms-guide-button" type="button" onClick={onOpenGuide} aria-haspopup="dialog">
+          📘 Cómo jugar y participar
+        </button>
+      </div>
     </section>
   );
 }
@@ -620,7 +733,7 @@ function RematchLobby({ room, playerId, selectedTeam, blockedIds, onOpenGallery,
           {blockedNames.length === 0
             ? <p style={{ opacity: .75 }}>Todavía no tienes Pokémon bloqueados.</p>
             : <div className="blocked-list">
-                {blockedNames.map((item) => <span key={item.id} className="blocked-chip">🚫 {pretty(item.name)} · #{item.id} — Bloqueada: perdió una ronda</span>)}
+                {blockedNames.map((item) => <span key={item.id} className="blocked-chip">🚫 {pretty(item.name)} · #{item.id} — Bloqueado: cayó en combate</span>)}
               </div>}
         </section>
       </div>
@@ -676,6 +789,9 @@ function BattleAudioEvents({ room }) {
 function SpectatorScreen({ room, onLeave, send }) {
   const playersA = room.players.filter((player) => player.side === 'A');
   const playersB = room.players.filter((player) => player.side === 'B');
+  const faintedA = getFaintedPokemonCount(room.players, 'A');
+  const faintedB = getFaintedPokemonCount(room.players, 'B');
+  const winnerLabel = getWinnerTrainerLabel(room);
 
   function renderSpectatorFighter(player) {
     const displayId = player.activeId || player.lastActiveId || player.team[0]?.id;
@@ -689,7 +805,7 @@ function SpectatorScreen({ room, onLeave, send }) {
         <div className="spectator-pokemon-name">{pretty(pokemon.name)}</div>
         {pokemon.transformation?.label && <small className="spectator-form-label">{pokemon.transformation.label}</small>}
         {!alive && <small className="spectator-fainted-label">Debilitado · esperando cambio</small>}
-        <div className="spectator-hp-track"><span style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / Math.max(1, pokemon.battleStats?.hp || 1) * 100))}%` }} /></div>
+        <div className="spectator-hp-track"><span className={getHealthBarClass(pokemon.currentHp, pokemon.battleStats?.hp || 1)} style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / Math.max(1, pokemon.battleStats?.hp || 1) * 100))}%` }} /></div>
         <div className="spectator-vitals"><span>{Math.max(0, pokemon.currentHp)} / {pokemon.battleStats?.hp || 0} HP</span><span>⚡ {pokemon.energy ?? 0}</span></div>
         {pokemon.shield > 0 && <small className="spectator-shield">Escudo {pokemon.shield}</small>}
         <div className="spectator-bench" aria-label={`Equipo completo de ${player.name}`}>
@@ -707,8 +823,13 @@ function SpectatorScreen({ room, onLeave, send }) {
         <div className="showdown-room"><strong>{room.code}</strong><span>OBSERVANDO · {room.mode === 'duos' ? 'DUOS 2v2' : '1v1'} · Turno {room.turn}</span>{room.phase === 'battle' && <TurnTimer turnStartedAt={room.turnStartedAt} durationMs={room.turnDurationMs} />}</div>
         <div className="showdown-topbar-actions"><span className="spectator-count-pill">◉ {room.spectatorCount || 1} mirando</span><button type="button" className="secondary-button" onClick={onLeave}>Dejar de mirar</button></div>
       </header>
-      {room.phase === 'finished' && <div className="spectator-finished-note">Combate terminado · {room.winnerSide ? `ganó el equipo ${room.winnerSide}` : 'empate'}</div>}
+      {room.phase === 'finished' && <div className="spectator-finished-note"><strong>{room.winnerSide ? `¡Victoria para ${winnerLabel}!` : '¡Empate!'}</strong><span>Marcador final: {faintedA}–{faintedB} Pokémon debilitados.</span></div>}
       <div className={`spectator-field ${room.mode === 'duos' ? 'spectator-field-duos' : ''}`}>
+        <div className="spectator-scoreboard" aria-label="Marcador de Pokémon debilitados">
+          <div className="spectator-score-team score-red"><span>Equipo rojo</span><strong>{faintedA}</strong></div>
+          <div className="spectator-score-caption"><b>POKÉMON</b><span>DEBILITADOS</span><small>Turno {room.turn}</small></div>
+          <div className="spectator-score-team score-blue"><span>Equipo azul</span><strong>{faintedB}</strong></div>
+        </div>
         <section className="spectator-side spectator-side-A"><h2>Equipo rojo</h2><div className="spectator-side-grid">{playersA.map(renderSpectatorFighter)}</div></section>
         <div className="spectator-vs">VS <small>TURNO {room.turn}</small></div>
         <section className="spectator-side spectator-side-B"><h2>Equipo azul</h2><div className="spectator-side-grid">{playersB.map(renderSpectatorFighter)}</div></section>
@@ -732,16 +853,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   const [showHotkeys, setShowHotkeys] = useState(false);
   const [capturingHotkey, setCapturingHotkey] = useState('');
   const [hotkeyMessage, setHotkeyMessage] = useState('');
-  const [hotkeys, setHotkeys] = useState(() => {
-    const defaults = { attack: 'z', defend: 'c', heal: 'x', recover: 'r', switch: 'v', transform: 't', tera: 'g', teraStrike: 'b' };
-    try {
-      const saved = JSON.parse(localStorage.getItem('dexorium-combat-hotkeys') || '{}');
-      const merged = { ...defaults, ...saved };
-      // Si una versión anterior guardó dos acciones con la misma tecla, volvemos a un mapa seguro.
-      const normalized = Object.values(merged).map((key) => String(key).toLowerCase());
-      return new Set(normalized).size === normalized.length ? merged : defaults;
-    } catch { return defaults; }
-  });
+  const [hotkeys, setHotkeys] = useState(readCombatHotkeys);
   const [cardMotions, setCardMotions] = useState([]);
   const seenMotionIdsRef = useRef(new Set((room.effects || []).map((effect) => effect?.id).filter(Boolean)));
 
@@ -787,6 +899,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   }
 
   const me = room.players.find((player) => player.id === playerId);
+  const winnerTrainerLabel = getWinnerTrainerLabel(room);
   const enemies = room.players.filter((player) => player.side !== me?.side);
   const allies = room.players.filter((player) => player.side === me?.side);
   const active = me?.team.find((pokemon) => pokemon.id === me.activeId);
@@ -850,7 +963,8 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
       if (!selectedTeraType || teamTeraUsed || active.teraType) return;
       payload.teraType = selectedTeraType;
     }
-    if (selectedTransform && action !== 'switch') payload.transformKey = selectedTransform.key;
+    // Tera y una transformación no se pueden activar sobre el mismo Pokémon.
+    if (selectedTransform && !['switch', 'tera'].includes(action)) payload.transformKey = selectedTransform.key;
     if (action === 'attack' || action === 'teraStrike') {
       payload.targetPlayerId = selectedTarget?.playerId;
       payload.targetPokemonId = selectedTarget?.pokemonId;
@@ -954,7 +1068,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
           {!isAliveActive && <span className="target-purpose target-purpose-fainted">Debilitado · esperando cambio</span>}
           {pokemon.transformed && <span className={`transformation-badge badge-${pokemon.transformation?.method || 'special'}`}>{pokemon.transformation?.label || 'Transformado'}</span>}
           <img src={pokemon.sprite || '/pokemon-placeholder.svg'} alt={pokemon.name} onError={(event) => handlePokemonSpriteError(event, pokemon.baseSprite)} />
-          <div className="fighter-hp"><span style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} /></div>
+          <div className="fighter-hp"><span className={getHealthBarClass(pokemon.currentHp, pokemon.battleStats.hp)} style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} /></div>
           <small>{Math.max(0, pokemon.currentHp)} / {pokemon.battleStats.hp} HP · Energía {pokemon.energy}</small>
           {pokemon.shield > 0 && <small className="fighter-shield">Escudo {pokemon.shield}</small>}
         </button>
@@ -972,7 +1086,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
           <DexoriumLogo className="dexorium-logo-finished" variant="light" />
           <p className="eyebrow">COMBATE TERMINADO</p>
           <h1>{isTie ? '¡Empate!' : isWinner ? '¡Victoria!' : 'Derrota'}</h1>
-          <p>{isTie ? 'Ningún equipo quedó con Pokémon disponibles.' : 'El servidor resolvió la partida.'}</p>
+          <p className="finished-winner-line">{isTie ? 'Ningún equipo quedó con Pokémon disponibles.' : `Victoria para ${winnerTrainerLabel}.`}</p>
           <div className="rematch-request-panel">
             {!room.rematchRequest && (
               <button className="primary-button" type="button" onClick={onRequestRematch}>Solicitar Revancha</button>
@@ -1001,7 +1115,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
           </div>
           <div className="finished-team-review">
             <h2 className="finished-team-review-title">Tu equipo y las formas usadas</h2>
-            <p>Los Pokémon que cayeron y las familias que transformaste quedan marcadas para la selección de la revancha.</p>
+            <p>Los Pokémon que llegaron a 0 PS quedan bloqueados para la revancha. Transformar a uno que sigue vivo no lo bloquea.</p>
             <TeamPanel team={me?.team || []} blockedIds={me?.blockedIds || []} showBlocked />
           </div>
         </div>
@@ -1056,7 +1170,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
           <div className="showdown-controls">
             <div className="choice-head">
               <div><strong>{active ? `¿Qué hará ${pretty(active.name)}?` : 'Sin Pokémon activo'}</strong><span>{hasSubmitted ? 'Jugada enviada. Espera a que se resuelva el turno.' : 'Elige una acción; las teclas rápidas también funcionan.'}</span></div>
-              <button className="hotkey-open-button" type="button" onClick={() => setShowHotkeys((value) => !value)}>⌨ Teclas</button>
+              <button className="hotkey-open-button" type="button" onClick={() => setShowHotkeys((value) => !value)}>⌨ Configurar teclas</button>
               {active && <div className="target-info target-summary">
                 <span>Atacar: <b className={`side-name side-${targetPlayer?.side || 'B'}`}>{targetPlayer?.name || 'elige un rival'}</b>{target ? ` · ${getEffectivenessLabel(multiplier)}` : ''}</span>
                 <span>Curar / defender: <b className={`side-name side-${supportTargetPlayer?.side || me?.side || 'A'}`}>{supportTargetPlayer?.name || 'elige un aliado'}</b>{supportTarget ? ` · ${pretty(supportTarget.name)}` : ''}</span>
@@ -1100,13 +1214,13 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
                   <span>Elegir una forma ({transformOptions.length}) antes de actuar</span>
                 </button>
               )}
-              <button className="battle-action terastallize" disabled={!active || hasSubmitted || waitingSwitch || teamTeraUsed || Boolean(active?.teraType)} onClick={() => { setSwitchOpen(false); setTransformPickerOpen(false); setTeraPickerOpen((value) => !value); }} type="button">
-                <b>{active?.teraType ? `Tipo Tera: ${active.teraType}` : <>Teracristalizar <kbd>{hotkeys.tera.toUpperCase()}</kbd></>}</b>
-                <span>{teamTeraUsed ? 'El equipo ya usó su Tera' : active?.teraType ? 'El tipo queda fijo este combate' : 'Elige uno de los 18 tipos'}</span>
+              <button className="battle-action terastallize" disabled={!active || hasSubmitted || waitingSwitch || teamTeraUsed || Boolean(active?.teraType) || Boolean(active?.transformed || active?.transformationUsed)} onClick={() => { setSwitchOpen(false); setTransformPickerOpen(false); setSelectedTransformKey(null); setTeraPickerOpen((value) => !value); }} type="button">
+                <b>{active?.teraType ? `Tipo Tera: ${active.teraType}` : active?.transformed || active?.transformationUsed ? 'Mecánica especial usada' : <>Teracristalizar <kbd>{hotkeys.tera.toUpperCase()}</kbd></>}</b>
+                <span>{teamTeraUsed ? 'El equipo ya usó su Tera' : active?.teraType ? 'El tipo queda fijo este combate' : active?.transformed || active?.transformationUsed ? 'Este Pokémon no puede usar otra mecánica especial' : 'Elige uno de los 18 tipos'}</span>
               </button>
             </div>
 
-            {teraPickerOpen && active && !hasSubmitted && !teamTeraUsed && !active.teraType && (
+            {teraPickerOpen && active && !hasSubmitted && !teamTeraUsed && !active.teraType && !active.transformed && !active.transformationUsed && (
               <div className="tera-type-picker tera-picker-redesign" role="dialog" aria-label="Elegir tipo de teracristalización">
                 <div className="tera-picker-heading">
                   <div className="tera-heading-symbol" aria-hidden="true">✦</div>
@@ -1215,6 +1329,8 @@ function ArenaApp() {
   const [room, setRoom] = useState(null);
   const [spectating, setSpectating] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
+  const [showGlobalHotkeys, setShowGlobalHotkeys] = useState(false);
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [stats, setStats] = useState(loadSavedStats);
   const inspectRequestRef = useRef(0);
   const lastCatalogRetryStartedRef = useRef(0);
@@ -1371,7 +1487,7 @@ function ArenaApp() {
   async function selectPokemon(identifier) {
     const requestedId = Number(typeof identifier === 'object' ? identifier.id : identifier);
     if (currentBlockedIds.includes(requestedId)) {
-      window.alert('Ese Pokémon está bloqueado porque perdió una ronda en esta sala.');
+      window.alert('Ese Pokémon está bloqueado para la revancha porque llegó a 0 PS en el combate anterior.');
       return;
     }
     if (selectedTeam.length >= 6) return;
@@ -1490,7 +1606,7 @@ function ArenaApp() {
 
   return (
     <div className="app-shell" data-offline-mode={catalog.offline ? 'true' : 'false'}>
-      {screen === 'intro' && <><PokedexIntro onContinue={() => { playSelection(); setScreen('team'); }} onPokemonCry={playPokemonCry} />{showStatsModal && <ResultsPanel stats={stats} onClose={() => setShowStatsModal(false)} />}</>}
+      {screen === 'intro' && <><PokedexIntro onContinue={() => { playSelection(); setScreen('team'); }} onOpenGuide={() => setShowHowToPlay(true)} onPokemonCry={playPokemonCry} />{showStatsModal && <ResultsPanel stats={stats} onClose={() => setShowStatsModal(false)} />}</>}
 
       {(screen === 'team' || screen === 'rematch_team') && (
         <>
@@ -1547,6 +1663,7 @@ function ArenaApp() {
             onLeave={leaveRoom}
             socketConnected={connected}
             onOpenStats={() => setShowStatsModal(true)}
+            onOpenGuide={() => setShowHowToPlay(true)}
             blockedIds={currentBlockedIds}
             send={send}
           />
@@ -1583,6 +1700,13 @@ function ArenaApp() {
           onSurrender={surrender}
         />
       )}
+      {!['battle', 'spectator'].includes(screen) && <button className="global-hotkeys-trigger" type="button" onClick={() => setShowGlobalHotkeys(true)} aria-haspopup="dialog">⌨ <span>Configurar teclas</span></button>}
+      {showGlobalHotkeys && <HotkeySettingsModal onClose={() => setShowGlobalHotkeys(false)} />}
+      {showHowToPlay && <HowToPlay onClose={() => setShowHowToPlay(false)} />}
+      <div className="studio-credit" aria-label="Créditos de Grillo Studio">
+        <img src="/brand/grillo-signature.png" alt="Firma de Grillo Studio" />
+        <span>By: Grillo_Studio´s</span>
+      </div>
     </div>
   );
 }

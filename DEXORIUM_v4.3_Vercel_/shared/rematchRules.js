@@ -1,5 +1,28 @@
+import { getTransformationFamilyIds } from './pokemonTransformations.js';
+
 // Estas funciones validan las solicitudes de revancha sin mezclar la decisión del rival
 // con la preparación del siguiente combate. El servidor conserva la autoridad final.
+
+// Solo bloqueamos Pokémon que realmente llegaron a 0 PS.
+// Una forma usada durante el combate no queda bloqueada si sobrevivió.
+export function getPokemonIdsBlockedAfterFaint(pokemon) {
+  const hp = Number(pokemon?.currentHp);
+  if (!Number.isFinite(hp) || hp > 0) return [];
+
+  const pokemonId = Number(pokemon?.id);
+  if (!Number.isSafeInteger(pokemonId) || pokemonId <= 0) return [];
+
+  const baseId = Number(pokemon?.baseId) || pokemonId;
+  const familyIds = getTransformationFamilyIds(baseId);
+  const isAlternateForm = pokemonId >= 10000 && familyIds.length > 1;
+  const usedFormChange = Boolean(pokemon?.transformed || pokemon?.transformation);
+
+  // Si cayó después de cambiar de forma, se bloquea esa familia; si no, solo ese Pokémon.
+  return usedFormChange || isAlternateForm
+    ? [...new Set(familyIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))]
+    : [pokemonId];
+}
+
 export function createRematchRequest(room, player, now = Date.now()) {
   if (!room || room.phase !== 'finished') {
     throw new Error('La revancha solo puede solicitarse al terminar la partida.');
