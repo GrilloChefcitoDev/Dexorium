@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Pokemon sin imagen disponible">
-  <defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f6f8ff"/><stop offset="1" stop-color="#d9e2f0"/></linearGradient><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#ff6d72"/><stop offset="1" stop-color="#cf1530"/></linearGradient></defs>
-  <circle cx="128" cy="128" r="112" fill="url(#a)" stroke="#273342" stroke-width="9"/>
-  <path d="M20 128a108 108 0 0 1 216 0Z" fill="url(#b)"/>
-  <path d="M20 128h216" stroke="#273342" stroke-width="13"/>
-  <circle cx="128" cy="128" r="35" fill="#f8fafc" stroke="#273342" stroke-width="10"/>
-  <circle cx="128" cy="128" r="17" fill="#dbe3ed" stroke="#273342" stroke-width="5"/>
-  <path d="M87 84c13-18 31-27 52-25" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" opacity=".72"/>
-</svg>
