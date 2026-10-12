@@ -10,7 +10,6 @@ export default function PokedexIntro({ onContinue, onPokemonCry }) {
   const playCry = onPokemonCry || audio.playPokemonCry;
   const [pokemon, setPokemon] = useState(null);
   const [query, setQuery] = useState('25');
-  const [open, setOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
@@ -47,20 +46,20 @@ export default function PokedexIntro({ onContinue, onPokemonCry }) {
   }
 
   return (
-    <section className={`intro-shell ${open ? 'intro-shell--open' : ''}`}>
+    <section className="intro-shell intro-shell--open">
       <div className="intro-copy">
         <p className="eyebrow">DEXORIUM · POKÉMON BATTLE ARENA</p>
         <img className="intro-dexorium-logo" src="/brand/dexorium-logo-light.png" alt="DEXORIUM" />
         <h1>Pokémon Battle Arena</h1>
         <p>
-          Revisa un Pokemon, busca cualquiera de PokeAPI y despues arma tu equipo para entrar a una batalla por turnos.
+          Consulta un Pokémon en la consola y arma tu equipo para entrar a una batalla por turnos.
         </p>
-        <button className="primary-button intro-open-button" type="button" onClick={() => setOpen((value) => !value)}>
-          {open ? 'Cerrar Pokedex' : 'Abrir Pokedex'}
+        <button className="primary-button arena-entry-button intro-entry-button" type="button" onClick={onContinue}>
+          Entrar a la Arena <span aria-hidden="true">→</span>
         </button>
       </div>
 
-      <div className="pokedex-3d" aria-label="Pokedex interactiva">
+      <div className="pokedex-3d is-open" aria-label="Pokédex interactiva">
         <div className="pokedex-3d__left">
           <div className="camera-light" />
           <div className="pokedex-screen">
@@ -96,7 +95,6 @@ export default function PokedexIntro({ onContinue, onPokemonCry }) {
               <small>SISTEMA</small>
               <strong>POKEDEX</strong>
             </div>
-            {open && <button className="pokedex-close-button" type="button" onClick={() => setOpen(false)}>x</button>}
           </div>
 
           <div className="mini-display">
@@ -128,11 +126,6 @@ export default function PokedexIntro({ onContinue, onPokemonCry }) {
           </div>
 
         </div>
-      </div>
-      <div className="intro-arena-action">
-        <button className="primary-button arena-entry-button" type="button" onClick={onContinue}>
-          Entrar a la Arena
-        </button>
       </div>
     </section>
   );

@@ -47,7 +47,9 @@ function SideLabel({ side }) {
 }
 
 function DexoriumLogo({ className = '', variant = 'dark' }) {
-  const logoSource = variant === 'light' ? '/brand/dexorium-logo-light.png' : '/brand/dexorium-logo.png';
+  const logoSource = variant === 'combat'
+    ? '/brand/dexorium-logo-combat.png'
+    : variant === 'light' ? '/brand/dexorium-logo-light.png' : '/brand/dexorium-logo.png';
   return (
     <div className={`dexorium-logo-lockup ${className}`}>
       <img src={logoSource} alt="DEXORIUM" />
@@ -140,9 +142,9 @@ function ChatMessages({ room }) {
 
 // Cada panel flotante tiene su propio tamaño, posición y estado de acople.
 // Al ocultarlo se pega al borde más cercano entre arriba, izquierda y derecha (nunca abajo).
-function useFloatingWindow({ width: baseWidth, height: baseHeight, initialX, initialY, minWidth = 250, minHeight = 200 }) {
-  const [open, setOpen] = useState(true);
-  const [dockEdge, setDockEdge] = useState('right');
+function useFloatingWindow({ width: baseWidth, height: baseHeight, initialX, initialY, minWidth = 250, minHeight = 200, initialOpen = true, initialDockEdge = 'right' }) {
+  const [open, setOpen] = useState(initialOpen);
+  const [dockEdge, setDockEdge] = useState(initialDockEdge);
   const [size, setSize] = useState(() => ({
     width: Math.min(baseWidth, Math.max(minWidth, window.innerWidth - 16)),
     height: Math.min(baseHeight, Math.max(minHeight, window.innerHeight - 16)),
@@ -232,19 +234,21 @@ function useFloatingWindow({ width: baseWidth, height: baseHeight, initialX, ini
       { edge: 'right', distance: Math.max(0, window.innerWidth - position.x - size.width) },
     ].sort((a, b) => a.distance - b.distance);
     const edge = distances[0].edge;
-    const tabWidth = edge === 'top' ? 154 : 42;
-    const tabHeight = edge === 'top' ? 34 : 86;
+    const tabWidth = edge === 'top' ? 128 : (window.innerWidth <= 560 ? 96 : 112);
+    const tabHeight = edge === 'top' ? 34 : 36;
     let x = position.x;
     let y = position.y;
     if (edge === 'top') {
-      x = Math.max(6, Math.min(window.innerWidth - tabWidth - 6, position.x + (size.width - tabWidth) / 2));
-      y = 6;
+      // Las pestañas se quedan en una esquina; así no tapan las cartas ni los botones de combate.
+      const nearLeftCorner = position.x + size.width / 2 < window.innerWidth / 2;
+      x = nearLeftCorner ? 8 : window.innerWidth - tabWidth - 8;
+      y = 4;
     } else if (edge === 'left') {
       x = 0;
-      y = Math.max(42, Math.min(window.innerHeight - tabHeight - 12, position.y));
+      y = 132;
     } else {
       x = Math.max(0, window.innerWidth - tabWidth);
-      y = Math.max(42, Math.min(window.innerHeight - tabHeight - 12, position.y));
+      y = 132;
     }
     setDockEdge(edge);
     setPosition({ x, y });
@@ -267,9 +271,10 @@ function useFloatingWindow({ width: baseWidth, height: baseHeight, initialX, ini
   const style = open
     ? { top: `${position.y}px`, left: `${position.x}px`, width: `${size.width}px`, height: `${size.height}px` }
     : {
-      top: `${position.y}px`, left: `${position.x}px`,
-      width: dockEdge === 'top' ? '154px' : '42px',
-      height: dockEdge === 'top' ? '34px' : '86px',
+      top: `${dockEdge === 'top' ? 4 : 132}px`,
+      left: `${dockEdge === 'left' ? 0 : dockEdge === 'right' ? Math.max(0, window.innerWidth - 38) : (position.x + size.width / 2 < window.innerWidth / 2 ? 8 : Math.max(8, window.innerWidth - 136))}px`,
+      width: dockEdge === 'top' ? '128px' : '38px',
+      height: dockEdge === 'top' ? '34px' : '98px',
     };
   return { open, dockEdge, size, position, style, beginDrag, beginResize, hide, show };
 }
@@ -285,7 +290,12 @@ function FloatingWindowTab({ edge, onClick, label }) {
 }
 
 function BattleSidebar({ room }) {
-  const floating = useFloatingWindow({ width: 350, height: 390, initialX: () => window.innerWidth - 368, initialY: 72, minWidth: 270, minHeight: 190 });
+  const floating = useFloatingWindow({ width: 350, height: 390, initialX: () => window.innerWidth - 368, initialY: 72, minWidth: 270, minHeight: 190, initialOpen: !['battle', 'finished'].includes(room.phase), initialDockEdge: 'right' });
+  useEffect(() => {
+    const toggle = () => { if (floating.open) floating.hide(); else floating.show(); };
+    window.addEventListener('dexorium:toggle-log', toggle);
+    return () => window.removeEventListener('dexorium:toggle-log', toggle);
+  }, [floating.open, floating.hide, floating.show]);
   const [minimized, setMinimized] = useState({ combat: false, actions: false });
   const combatLogs = (room?.logs || []).filter((log) => log.kind !== 'chat').slice(-60);
   const toggleSection = (section) => setMinimized((current) => ({ ...current, [section]: !current[section] }));
@@ -294,7 +304,7 @@ function BattleSidebar({ room }) {
     <aside className={`floating-battle-window ${floating.open ? 'is-open' : `is-docked dock-${floating.dockEdge}`}`} style={floating.style}>
       {floating.open ? <>
         <header className="floating-window-titlebar">
-          <div className="floating-drag-handle" onPointerDown={floating.beginDrag} title="Arrastra desde cualquier parte de esta barra para mover la ventana"><span>⠿</span><b>DEXORIUM · COMBATE</b><small>mover</small></div>
+          <div className="floating-drag-handle" onPointerDown={floating.beginDrag} title="Arrastra desde cualquier parte de esta barra para mover la ventana"><span>⠿</span><b>Turnos y acciones</b><small>mover</small></div>
           <button type="button" className="floating-window-minimize" onClick={floating.hide} aria-label="Ocultar ventana de combate" title="Ocultar y acoplar al borde">—</button>
         </header>
         <div className="battle-sidebar-content">
@@ -314,7 +324,7 @@ function BattleSidebar({ room }) {
             ))}
           </section>
           <section className={`battle-log-box ${minimized.actions ? 'section-is-minimized' : ''}`}>
-            <div className="sidebar-title-row"><h2>Acciones de ambos jugadores</h2><button className="section-minimize-button" type="button" onClick={() => toggleSection('actions')} aria-label={minimized.actions ? 'Expandir acciones' : 'Minimizar acciones'}>{minimized.actions ? '+' : '−'}</button></div>
+            <div className="sidebar-title-row"><h2>Registro de acciones</h2><button className="section-minimize-button" type="button" onClick={() => toggleSection('actions')} aria-label={minimized.actions ? 'Expandir acciones' : 'Minimizar acciones'}>{minimized.actions ? '+' : '−'}</button></div>
             {!minimized.actions && <div className="battle-log">
               {combatLogs.length === 0 && <p className="chat-empty">Esperando la primera jugada.</p>}
               {combatLogs.map((log, index) => (
@@ -327,13 +337,31 @@ function BattleSidebar({ room }) {
           </section>
         </div>
         <FloatingResizeHandles onResize={floating.beginResize} />
-      </> : <FloatingWindowTab edge={floating.dockEdge} onClick={floating.show} label="Abrir combate" />}
+      </> : <FloatingWindowTab edge={floating.dockEdge} onClick={floating.show} label="Turnos" />}
     </aside>
   );
 }
 
 function ChatWindow({ room, send }) {
-  const floating = useFloatingWindow({ width: 370, height: 340, initialX: 18, initialY: () => Math.max(90, Math.min(250, window.innerHeight - 360)), minWidth: 285, minHeight: 230 });
+  const floating = useFloatingWindow({ width: 350, height: 430, initialX: 8, initialY: 132, minWidth: 285, minHeight: 230, initialOpen: !['battle', 'finished'].includes(room.phase), initialDockEdge: 'left' });
+  const previousPhaseRef = useRef(room.phase);
+  const chatWindowStyle = floating.open
+    ? { top: '132px', left: '8px', width: 'min(350px, calc(100vw - 16px))', height: 'min(430px, calc(100vh - 150px))' }
+    : { top: '132px', left: '0px', width: '38px', height: '98px' };
+
+  // Al entrar al combate el chat queda como una pestaña al lado; abrirlo no lo vuelve movible.
+  useEffect(() => {
+    const wasPreparing = !['battle', 'finished'].includes(previousPhaseRef.current);
+    const isInCombat = ['battle', 'finished'].includes(room.phase);
+    if (wasPreparing && isInCombat && floating.open) floating.hide();
+    previousPhaseRef.current = room.phase;
+  }, [room.phase]);
+
+  useEffect(() => {
+    const toggle = () => { if (floating.open) floating.hide(); else floating.show(); };
+    window.addEventListener('dexorium:toggle-chat', toggle);
+    return () => window.removeEventListener('dexorium:toggle-chat', toggle);
+  }, [floating.open, floating.hide, floating.show]);
   const [message, setMessage] = useState('');
   const [chatError, setChatError] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -362,11 +390,11 @@ function ChatWindow({ room, send }) {
   }
 
   return (
-    <aside className={`floating-chat-window ${floating.open ? 'is-open' : `is-docked dock-${floating.dockEdge}`}`} style={floating.style}>
+    <aside className={`floating-chat-window ${floating.open ? 'is-open' : `is-docked dock-${floating.dockEdge}`}`} style={chatWindowStyle}>
       {floating.open ? <>
-        <header className="floating-window-titlebar chat-window-titlebar">
-          <div className="floating-drag-handle" onPointerDown={floating.beginDrag} title="Arrastra desde esta barra para mover el chat"><span>⠿</span><b>Chat de la sala</b><small>en vivo</small></div>
-          <button type="button" className="floating-window-minimize" onClick={floating.hide} aria-label="Ocultar chat" title="Ocultar y acoplar al borde">—</button>
+        <header className="floating-window-titlebar chat-window-titlebar chat-fixed-titlebar">
+          <div className="chat-fixed-heading"><span aria-hidden="true">💬</span><b>Chat de la sala</b><small>en vivo</small></div>
+          <button type="button" className="floating-window-minimize" onClick={floating.hide} aria-label="Minimizar chat" title="Minimizar chat al borde">—</button>
         </header>
         <ChatMessages room={room} />
         {chatError && <p className="error-banner chat-error-banner" role="alert">{chatError}</p>}
@@ -385,8 +413,7 @@ function ChatWindow({ room, send }) {
           <input value={message} onChange={(event) => { setMessage(event.target.value); setChatError(''); }} placeholder="Escribe un mensaje (máx 200)..." maxLength={400} />
           <button type="submit">Enviar</button>
         </form>
-        <FloatingResizeHandles onResize={floating.beginResize} />
-      </> : <FloatingWindowTab edge={floating.dockEdge} onClick={floating.show} label="Abrir chat" />}
+      </> : <FloatingWindowTab edge="left" onClick={floating.show} label="Chat" />}
     </aside>
   );
 }
@@ -394,34 +421,32 @@ function ChatWindow({ room, send }) {
 
 // Actividad 1: Panel de Resultados
 function ResultsPanel({ stats, onClose }) {
+  useEffect(() => {
+    const closeOnEscape = (event) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
   return (
-    <div className="victory-panel" style={{ maxWidth: '400px', margin: '40px auto' }}>
-      <p className="eyebrow">ESTADÍSTICA LOCAL</p>
-      <h2>Mis Resultados</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', margin: '20px 0' }}>
-        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '10px' }}>
-          <small>Victorias</small>
-          <strong style={{ fontSize: '24px', color: 'var(--success)' }}>{stats.wins}</strong>
+    <div className="results-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="results-floating-panel" role="dialog" aria-modal="true" aria-labelledby="results-title">
+        <div className="results-floating-heading">
+          <div><p className="eyebrow">ESTADÍSTICA LOCAL</p><h2 id="results-title">Mis resultados</h2></div>
+          <button className="results-close-button" type="button" onClick={onClose} aria-label="Cerrar resultados">×</button>
         </div>
-        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '10px' }}>
-          <small>Derrotas</small>
-          <strong style={{ fontSize: '24px', color: 'var(--danger)' }}>{stats.losses}</strong>
+        <div className="results-compact-grid">
+          <div><span>Victorias</span><strong className="result-win">{stats.wins}</strong></div>
+          <div><span>Derrotas</span><strong className="result-loss">{stats.losses}</strong></div>
+          <div><span>Empates</span><strong className="result-tie">{stats.ties}</strong></div>
+          <div><span>Partidas jugadas</span><strong>{stats.played}</strong></div>
         </div>
-        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '10px' }}>
-          <small>Empates</small>
-          <strong style={{ fontSize: '24px', color: 'var(--yellow)' }}>{stats.ties}</strong>
-        </div>
-        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '10px' }}>
-          <small>Partidas</small>
-          <strong style={{ fontSize: '24px' }}>{stats.played}</strong>
-        </div>
-      </div>
-      <button className="primary-button wide" type="button" onClick={onClose}>Cerrar</button>
+        <button className="secondary-button wide" type="button" onClick={onClose}>Cerrar</button>
+      </section>
     </div>
   );
 }
 
-function RoomLobby({ playerName, setPlayerName, selectedTeam, rooms, onCreate, onJoin, onRefresh, currentRoom, onLeave, socketConnected, onOpenStats, blockedIds, send }) {
+function RoomLobby({ playerName, setPlayerName, selectedTeam, rooms, onCreate, onJoin, onSpectate, onRefresh, currentRoom, onLeave, socketConnected, onOpenStats, blockedIds, send }) {
   const [mode, setMode] = useState('solo');
   const [visibility, setVisibility] = useState('public');
   const [password, setPassword] = useState('');
@@ -519,12 +544,14 @@ function RoomLobby({ playerName, setPlayerName, selectedTeam, rooms, onCreate, o
         </section>
 
         <section className="public-rooms-card">
-          <div className="section-title"><h2>Salas publicas</h2><button type="button" className="ghost-button" onClick={onRefresh}>Actualizar</button></div>
+          <div className="section-title"><h2>Salas públicas</h2><button type="button" className="ghost-button" onClick={onRefresh}>Actualizar</button></div>
           {rooms.length === 0 && <p className="muted">No hay salas publicas disponibles.</p>}
-          {rooms.map((room) => (
-            <article key={room.code} className="public-room-row">
-              <div><strong>{room.code}</strong><span>{room.mode === 'duos' ? 'DUOS' : '1v1'} · {room.players}/{room.maxPlayers} · {room.protected ? 'Protegida' : 'Sin contraseña'}</span></div>
-              <button className="secondary-button" type="button" onClick={() => { setRoomCode(room.code); setJoinPassword(''); }}>Seleccionar</button>
+          {rooms.map((listedRoom) => (
+            <article key={listedRoom.code} className={`public-room-row ${listedRoom.phase === 'battle' ? 'public-room-row-live' : ''}`}>
+              <div><strong>{listedRoom.code}</strong><span>{listedRoom.mode === 'duos' ? 'DUOS' : '1v1'} · {listedRoom.players}/{listedRoom.maxPlayers} · {listedRoom.phase === 'battle' ? `En combate · turno ${listedRoom.turn || 1} · ${listedRoom.spectators || 0} mirando` : (listedRoom.protected ? 'Protegida' : 'Sin contraseña')}</span></div>
+              {listedRoom.phase === 'battle'
+                ? <button className="secondary-button spectate-room-button" type="button" onClick={() => onSpectate(listedRoom.code)}>Ver combate</button>
+                : <button className="secondary-button" type="button" onClick={() => { setRoomCode(listedRoom.code); setJoinPassword(''); }}>Seleccionar</button>}
             </article>
           ))}
           <label>Codigo<input value={roomCode} onChange={(event) => setRoomCode(event.target.value.toUpperCase())} placeholder="ABCDE" maxLength={5} /></label>
@@ -603,7 +630,7 @@ function RematchLobby({ room, playerId, selectedTeam, blockedIds, onOpenGallery,
   );
 }
 
-function TurnTimer({ turnStartedAt, durationMs = 30_000 }) {
+function TurnTimer({ turnStartedAt, durationMs = 45_000, hasSubmitted = false }) {
   const [secondsLeft, setSecondsLeft] = useState(Math.ceil(durationMs / 1000));
 
   useEffect(() => {
@@ -616,9 +643,16 @@ function TurnTimer({ turnStartedAt, durationMs = 30_000 }) {
     return () => window.clearInterval(timer);
   }, [turnStartedAt, durationMs]);
 
+  const totalSeconds = Math.max(1, Math.ceil(durationMs / 1000));
+  const progress = Math.max(0, Math.min(100, (secondsLeft / totalSeconds) * 100));
   const minutes = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
   const seconds = String(secondsLeft % 60).padStart(2, '0');
-  return <span className={secondsLeft <= 5 ? 'turn-timer is-low' : 'turn-timer'}>{secondsLeft === 0 ? 'Acción automática…' : `Tiempo ${minutes}:${seconds}`}</span>;
+  return (
+    <div className={`turn-timer-card ${secondsLeft <= 8 ? 'is-low' : ''} ${hasSubmitted ? 'is-waiting' : 'is-ready'}`} aria-live="polite" title="Todos eligen su acción dentro del mismo turno">
+      <div className="turn-timer-label"><b>{hasSubmitted ? 'ESPERANDO RESOLUCIÓN' : 'TU JUGADA'}</b><strong>{secondsLeft === 0 ? 'Acción automática…' : `${minutes}:${seconds}`}</strong></div>
+      <div className="turn-timer-track"><span style={{ width: `${progress}%` }} /></div>
+    </div>
+  );
 }
 
 // Los efectos llegan desde el servidor con un ID único para que cada sonido se reproduzca una sola vez por navegador.
@@ -636,6 +670,56 @@ function BattleAudioEvents({ room }) {
   return null;
 }
 
+
+// La vista de espectador muestra lo que pasa en el campo sin permitir acciones de combate.
+// El registro y el chat siguen disponibles para comentar la partida en directo.
+function SpectatorScreen({ room, onLeave, send }) {
+  const playersA = room.players.filter((player) => player.side === 'A');
+  const playersB = room.players.filter((player) => player.side === 'B');
+
+  function renderSpectatorFighter(player) {
+    const displayId = player.activeId || player.lastActiveId || player.team[0]?.id;
+    const pokemon = player.team.find((entry) => Number(entry.id) === Number(displayId)) || player.team[0];
+    if (!pokemon) return null;
+    const alive = Boolean(player.activeId && Number(player.activeId) === Number(pokemon.id) && pokemon.currentHp > 0);
+    return (
+      <article className={`spectator-fighter-card side-${player.side} ${alive ? '' : 'is-fainted'}`} key={player.id}>
+        <header><strong>{player.name}</strong><span>{player.side === 'A' ? 'Equipo rojo' : 'Equipo azul'}</span></header>
+        <img src={pokemon.sprite || '/pokemon-placeholder.svg'} alt={pokemon.name} onError={(event) => handlePokemonSpriteError(event, pokemon.baseSprite)} />
+        <div className="spectator-pokemon-name">{pretty(pokemon.name)}</div>
+        {pokemon.transformation?.label && <small className="spectator-form-label">{pokemon.transformation.label}</small>}
+        {!alive && <small className="spectator-fainted-label">Debilitado · esperando cambio</small>}
+        <div className="spectator-hp-track"><span style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / Math.max(1, pokemon.battleStats?.hp || 1) * 100))}%` }} /></div>
+        <div className="spectator-vitals"><span>{Math.max(0, pokemon.currentHp)} / {pokemon.battleStats?.hp || 0} HP</span><span>⚡ {pokemon.energy ?? 0}</span></div>
+        {pokemon.shield > 0 && <small className="spectator-shield">Escudo {pokemon.shield}</small>}
+        <div className="spectator-bench" aria-label={`Equipo completo de ${player.name}`}>
+          {player.team.map((member) => <span key={member.id} className={`${member.currentHp <= 0 ? 'down' : ''} ${Number(member.id) === Number(player.activeId) ? 'active' : ''}`} title={`${pretty(member.name)} · ${Math.max(0, member.currentHp)}/${member.battleStats?.hp || 0} HP`}>{pretty(member.name)}</span>)}
+        </div>
+      </article>
+    );
+  }
+
+  return (
+    <section className="battle-screen spectator-screen">
+      <BattleAudioEvents room={room} />
+      <header className="showdown-topbar spectator-topbar">
+        <div className="showdown-brand"><DexoriumLogo /></div>
+        <div className="showdown-room"><strong>{room.code}</strong><span>OBSERVANDO · {room.mode === 'duos' ? 'DUOS 2v2' : '1v1'} · Turno {room.turn}</span>{room.phase === 'battle' && <TurnTimer turnStartedAt={room.turnStartedAt} durationMs={room.turnDurationMs} />}</div>
+        <div className="showdown-topbar-actions"><span className="spectator-count-pill">◉ {room.spectatorCount || 1} mirando</span><button type="button" className="secondary-button" onClick={onLeave}>Dejar de mirar</button></div>
+      </header>
+      {room.phase === 'finished' && <div className="spectator-finished-note">Combate terminado · {room.winnerSide ? `ganó el equipo ${room.winnerSide}` : 'empate'}</div>}
+      <div className={`spectator-field ${room.mode === 'duos' ? 'spectator-field-duos' : ''}`}>
+        <section className="spectator-side spectator-side-A"><h2>Equipo rojo</h2><div className="spectator-side-grid">{playersA.map(renderSpectatorFighter)}</div></section>
+        <div className="spectator-vs">VS <small>TURNO {room.turn}</small></div>
+        <section className="spectator-side spectator-side-B"><h2>Equipo azul</h2><div className="spectator-side-grid">{playersB.map(renderSpectatorFighter)}</div></section>
+      </div>
+      <p className="spectator-footnote">Estás viendo la partida en directo. Puedes escribir en el chat y consultar el registro, pero no enviar jugadas.</p>
+      <BattleSidebar room={room} />
+      <ChatWindow room={room} send={send} />
+    </section>
+  );
+}
+
 function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAcceptRematch, onRejectRematch, onCancelRematch, onSurrender }) {
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [selectedSupportTarget, setSelectedSupportTarget] = useState(null);
@@ -643,6 +727,21 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   const [selectedAction, setSelectedAction] = useState(null);
   const [transformPickerOpen, setTransformPickerOpen] = useState(false);
   const [selectedTransformKey, setSelectedTransformKey] = useState(null);
+  const [teraPickerOpen, setTeraPickerOpen] = useState(false);
+  const [selectedTeraType, setSelectedTeraType] = useState('');
+  const [showHotkeys, setShowHotkeys] = useState(false);
+  const [capturingHotkey, setCapturingHotkey] = useState('');
+  const [hotkeyMessage, setHotkeyMessage] = useState('');
+  const [hotkeys, setHotkeys] = useState(() => {
+    const defaults = { attack: 'z', defend: 'c', heal: 'x', recover: 'r', switch: 'v', transform: 't', tera: 'g', teraStrike: 'b' };
+    try {
+      const saved = JSON.parse(localStorage.getItem('dexorium-combat-hotkeys') || '{}');
+      const merged = { ...defaults, ...saved };
+      // Si una versión anterior guardó dos acciones con la misma tecla, volvemos a un mapa seguro.
+      const normalized = Object.values(merged).map((key) => String(key).toLowerCase());
+      return new Set(normalized).size === normalized.length ? merged : defaults;
+    } catch { return defaults; }
+  });
   const [cardMotions, setCardMotions] = useState([]);
   const seenMotionIdsRef = useRef(new Set((room.effects || []).map((effect) => effect?.id).filter(Boolean)));
 
@@ -655,6 +754,11 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
       window.setTimeout(() => setCardMotions((current) => current.filter((item) => item.id !== effect.id)), 900);
     });
   }, [room.effects]);
+
+  useEffect(() => {
+    try { localStorage.setItem('dexorium-combat-hotkeys', JSON.stringify(hotkeys)); } catch { /* Las teclas siguen activas durante esta sesión. */ }
+  }, [hotkeys]);
+
 
   function motionFor(pokemon, side, role, ownerId) {
     const matching = cardMotions.filter((effect) => {
@@ -687,6 +791,9 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   const allies = room.players.filter((player) => player.side === me?.side);
   const active = me?.team.find((pokemon) => pokemon.id === me.activeId);
   const teamTransformationUsage = room.transformationUsage?.[me?.side] || { dynamaxUsed: false, gigantamaxUsed: false };
+  const teamTeraUsed = Boolean(room.teraUsage?.[me?.side]);
+  const teraTypes = ['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy'];
+  const teraTypeLabels = { normal: 'Normal', fire: 'Fuego', water: 'Agua', electric: 'Eléctrico', grass: 'Planta', ice: 'Hielo', fighting: 'Lucha', poison: 'Veneno', ground: 'Tierra', flying: 'Volador', psychic: 'Psíquico', bug: 'Bicho', rock: 'Roca', ghost: 'Fantasma', dragon: 'Dragón', dark: 'Siniestro', steel: 'Acero', fairy: 'Hada' };
   const transformOptions = active ? getTransformationOptions(active, me?.team || [], teamTransformationUsage) : [];
   const selectedTransform = transformOptions.find((option) => option.key === selectedTransformKey) || null;
   const hasSubmitted = room.pendingPlayerIds?.includes(playerId);
@@ -732,13 +839,19 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   useEffect(() => {
     setSelectedTransformKey(null);
     setTransformPickerOpen(false);
+    setTeraPickerOpen(false);
+    setSelectedTeraType('');
   }, [room.turn, active?.id, active?.transformed]);
 
   function play(action) {
     if (!active || hasSubmitted || waitingSwitch || active.currentHp <= 0) return;
     const payload = { type: 'PLAY_ACTION', action, pokemonId: active.id, turn: room.turn };
+    if (action === 'tera') {
+      if (!selectedTeraType || teamTeraUsed || active.teraType) return;
+      payload.teraType = selectedTeraType;
+    }
     if (selectedTransform && action !== 'switch') payload.transformKey = selectedTransform.key;
-    if (action === 'attack') {
+    if (action === 'attack' || action === 'teraStrike') {
       payload.targetPlayerId = selectedTarget?.playerId;
       payload.targetPokemonId = selectedTarget?.pokemonId;
     } else if (action === 'heal' || action === 'defend') {
@@ -747,10 +860,11 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
       payload.targetPokemonId = selectedSupportTarget?.pokemonId || active.id;
     }
     if (send(payload)) {
-      const actionName = action === 'attack' ? active.actions.attack.name : action === 'defend' ? active.actions.defend.name : action === 'heal' ? active.actions.heal.name : action === 'recover' ? active.actions.recover.name : 'Cambio';
+      const actionName = action === 'attack' ? active.actions.attack.name : action === 'teraStrike' ? active.actions.teraStrike?.name || 'Tera Golpe' : action === 'tera' ? `Teracristalización ${selectedTeraType}` : action === 'defend' ? active.actions.defend.name : action === 'heal' ? active.actions.heal.name : action === 'recover' ? active.actions.recover.name : 'Cambio';
       setSelectedAction(selectedTransform ? `${selectedTransform.label} + ${actionName}` : actionName);
       setSelectedTransformKey(null);
       setTransformPickerOpen(false);
+      if (action === 'tera') { setTeraPickerOpen(false); setSelectedTeraType(''); }
     }
   }
 
@@ -767,6 +881,43 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   function forcedSwitch(id) {
     send({ type: 'CHOOSE_POKEMON', pokemonId: Number(id) });
   }
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (capturingHotkey) {
+        if (event.key === 'Escape') { setCapturingHotkey(''); return; }
+        if (event.key.length === 1 || ['Enter', 'Backspace', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+          event.preventDefault();
+          const nextKey = event.key.toLowerCase();
+          const usedBy = Object.entries(hotkeys).find(([actionName, boundKey]) => actionName !== capturingHotkey && String(boundKey).toLowerCase() === nextKey);
+          if (usedBy) { setHotkeyMessage(`Esa tecla ya se usa para ${usedBy[0]}. Elige otra.`); return; }
+          setHotkeys((current) => ({ ...current, [capturingHotkey]: nextKey }));
+          setHotkeyMessage('');
+          setCapturingHotkey('');
+        }
+        return;
+      }
+      if (showHotkeys || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+      const key = event.key.toLowerCase();
+      const action = Object.entries(hotkeys).find(([, boundKey]) => String(boundKey).toLowerCase() === key)?.[0];
+      if (!action) return;
+      if (['attack', 'defend', 'heal', 'recover', 'teraStrike'].includes(action)) {
+        if (action === 'teraStrike' && !active?.actions?.teraStrike) return;
+        event.preventDefault();
+        play(action);
+      } else if (action === 'switch' && !hasSubmitted && !waitingSwitch && active) {
+        event.preventDefault(); setSwitchOpen((value) => !value); setTransformPickerOpen(false); setTeraPickerOpen(false);
+      } else if (action === 'transform' && !hasSubmitted && !waitingSwitch && transformOptions.length) {
+        event.preventDefault(); setTransformPickerOpen((value) => !value); setSwitchOpen(false); setTeraPickerOpen(false);
+      } else if (action === 'tera' && !hasSubmitted && !waitingSwitch && active && !active.teraType && !teamTeraUsed) {
+        event.preventDefault(); setTeraPickerOpen((value) => !value); setSwitchOpen(false); setTransformPickerOpen(false);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [capturingHotkey, showHotkeys, hotkeys, play, hasSubmitted, waitingSwitch, active, transformOptions, teamTeraUsed]);
 
   const targetPlayer = selectedTarget ? room.players.find((player) => player.id === selectedTarget.playerId) : null;
   const target = targetPlayer?.team.find((pokemon) => Number(pokemon.id) === Number(selectedTarget?.pokemonId));
@@ -864,9 +1015,11 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
     <section className="battle-screen">
       <BattleAudioEvents room={room} />
       <div className="showdown-topbar">
-        <div className="showdown-brand" aria-label="DEXORIUM Pokémon Battle Arena"><DexoriumLogo /></div>
-        <div className="showdown-room"><strong>{room.code}</strong><span>{room.mode === 'duos' ? 'DUOS 2v2' : '1v1'} · Turno {room.turn}</span><TurnTimer turnStartedAt={room.turnStartedAt} durationMs={room.turnDurationMs} /></div>
-        <button className="surrender-button" type="button" onClick={() => { if (window.confirm("¿Seguro que quieres rendirte? La partida contará como derrota.")) onSurrender(); }}>🏳️ Rendirse</button>
+        <div className="showdown-brand" aria-label="DEXORIUM"><DexoriumLogo variant="combat" className="combat-logo" /></div>
+        <div className="showdown-room"><strong>{room.code}</strong><span>{room.mode === 'duos' ? 'DUOS 2v2' : '1v1'} · Turno {room.turn}</span><TurnTimer turnStartedAt={room.turnStartedAt} durationMs={room.turnDurationMs} hasSubmitted={hasSubmitted} /></div>
+        <div className="showdown-topbar-actions">
+          <button className="surrender-button" type="button" onClick={() => { if (window.confirm("¿Seguro que quieres rendirte? La partida contará como derrota.")) onSurrender(); }}>🏳️ Rendirse</button>
+        </div>
       </div>
 
       <div className="battle-layout showdown-layout">
@@ -902,7 +1055,8 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
 
           <div className="showdown-controls">
             <div className="choice-head">
-              <div><strong>{active ? `Que hara ${pretty(active.name)}?` : 'Sin Pokémon activo'}</strong><span>Tu jugada se manda al servidor y se ejecuta por velocidad.</span></div>
+              <div><strong>{active ? `¿Qué hará ${pretty(active.name)}?` : 'Sin Pokémon activo'}</strong><span>{hasSubmitted ? 'Jugada enviada. Espera a que se resuelva el turno.' : 'Elige una acción; las teclas rápidas también funcionan.'}</span></div>
+              <button className="hotkey-open-button" type="button" onClick={() => setShowHotkeys((value) => !value)}>⌨ Teclas</button>
               {active && <div className="target-info target-summary">
                 <span>Atacar: <b className={`side-name side-${targetPlayer?.side || 'B'}`}>{targetPlayer?.name || 'elige un rival'}</b>{target ? ` · ${getEffectivenessLabel(multiplier)}` : ''}</span>
                 <span>Curar / defender: <b className={`side-name side-${supportTargetPlayer?.side || me?.side || 'A'}`}>{supportTargetPlayer?.name || 'elige un aliado'}</b>{supportTarget ? ` · ${pretty(supportTarget.name)}` : ''}</span>
@@ -913,35 +1067,61 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
             <div className="transformation-resource-strip" aria-live="polite">
               <span><b>Dinamax:</b> {teamTransformationUsage.dynamaxUsed ? 'usado por el equipo' : 'disponible'}</span>
               <span><b>Gigamax:</b> {teamTransformationUsage.gigantamaxUsed ? 'usado por el equipo' : 'disponible'}</span>
+              <span><b>Tera:</b> {teamTeraUsed ? 'usado por el equipo' : 'disponible'}</span>
             </div>
             <div className="battle-choice-grid">
               <button className="battle-action attack" disabled={!active || hasSubmitted || waitingSwitch || active.energy < (active.actions.attack?.energyCost || 0)} onClick={() => play('attack')} type="button">
-                <b>Atacar</b>
+                <b>Atacar <kbd>{hotkeys.attack.toUpperCase()}</kbd></b>
                 <span>{active?.actions.attack.name || 'Ataque'} · {active?.actions.attack.type || '-'} · {active?.actions.attack.power || 0} poder · −{active?.actions.attack.energyCost || 0} energía</span>
               </button>
+              {active?.actions.teraStrike && <button className="battle-action tera-strike" disabled={!active || hasSubmitted || waitingSwitch || active.energy < (active.actions.teraStrike?.energyCost || 0)} onClick={() => play('teraStrike')} type="button">
+                <b>Tera Golpe <kbd>{String(hotkeys.teraStrike || 'b').toUpperCase()}</kbd></b>
+                <span>{active.actions.teraStrike.name} · {active.actions.teraStrike.type} · {active.actions.teraStrike.power} poder · −{active.actions.teraStrike.energyCost} energía</span>
+              </button>}
               <button className="battle-action defend" disabled={!active || hasSubmitted || waitingSwitch || active.energy < (active.actions.defend?.energyCost || 0)} onClick={() => play('defend')} type="button">
-                <b>Defender</b>
+                <b>Defender <kbd>{hotkeys.defend.toUpperCase()}</kbd></b>
                 <span>Protege al objetivo de apoyo · escudo {active?.actions.defend.shield || 0} · −{active?.actions.defend.energyCost || 0} energía</span>
               </button>
               <button className="battle-action heal" disabled={!active || hasSubmitted || waitingSwitch || active.energy < (active.actions.heal?.energyCost || 0)} onClick={() => play('heal')} type="button">
-                <b>Curar</b>
+                <b>Curar <kbd>{hotkeys.heal.toUpperCase()}</kbd></b>
                 <span>Cura al objetivo de apoyo · +{active?.actions.heal.heal || 0} vida · −{active?.actions.heal.energyCost || 0} energía</span>
               </button>
               <button className="battle-action recover" disabled={!active || hasSubmitted || waitingSwitch || active.energy >= MAX_ENERGY} onClick={() => play('recover')} type="button">
-                <b>Recargar energía</b>
+                <b>Recargar energía <kbd>{hotkeys.recover.toUpperCase()}</kbd></b>
                 <span>+{active?.actions.recover?.gain || 35} energía · regeneración adicional al final del turno</span>
               </button>
               <button className="battle-action switch" disabled={!active || hasSubmitted || waitingSwitch} onClick={() => { setSelectedTransformKey(null); setTransformPickerOpen(false); setSwitchOpen((value) => !value); }} type="button">
-                <b>Cambiar</b>
+                <b>Cambiar <kbd>{hotkeys.switch.toUpperCase()}</kbd></b>
                 <span>Elige otro Pokémon de tu equipo</span>
               </button>
               {transformOptions.length > 0 && (
-                <button className="battle-action transform" disabled={!active || hasSubmitted || waitingSwitch} onClick={() => { setSwitchOpen(false); setTransformPickerOpen((value) => !value); }} type="button">
-                  <b>Transformación</b>
+                <button className="battle-action transform" disabled={!active || hasSubmitted || waitingSwitch} onClick={() => { setSwitchOpen(false); setTeraPickerOpen(false); setTransformPickerOpen((value) => !value); }} type="button">
+                  <b>Transformación <kbd>{hotkeys.transform.toUpperCase()}</kbd></b>
                   <span>Elegir una forma ({transformOptions.length}) antes de actuar</span>
                 </button>
               )}
+              <button className="battle-action terastallize" disabled={!active || hasSubmitted || waitingSwitch || teamTeraUsed || Boolean(active?.teraType)} onClick={() => { setSwitchOpen(false); setTransformPickerOpen(false); setTeraPickerOpen((value) => !value); }} type="button">
+                <b>{active?.teraType ? `Tipo Tera: ${active.teraType}` : <>Teracristalizar <kbd>{hotkeys.tera.toUpperCase()}</kbd></>}</b>
+                <span>{teamTeraUsed ? 'El equipo ya usó su Tera' : active?.teraType ? 'El tipo queda fijo este combate' : 'Elige uno de los 18 tipos'}</span>
+              </button>
             </div>
+
+            {teraPickerOpen && active && !hasSubmitted && !teamTeraUsed && !active.teraType && (
+              <div className="tera-type-picker tera-picker-redesign" role="dialog" aria-label="Elegir tipo de teracristalización">
+                <div className="tera-picker-heading">
+                  <div className="tera-heading-symbol" aria-hidden="true">✦</div>
+                  <div className="tera-heading-copy"><span className="tera-eyebrow">CRISTAL TERA</span><h3>Elige tu tipo Tera</h3><p>El tipo elegido cambiará a tu Pokémon y habilitará Tera Golpe durante el resto del combate.</p></div>
+                  <button className="tera-close-button" type="button" onClick={() => setTeraPickerOpen(false)} aria-label="Cerrar selector Tera">×</button>
+                </div>
+                <div className="tera-selection-preview">
+                  <span className={`tera-preview-gem tera-color-${selectedTeraType || 'normal'}`} aria-hidden="true">✦</span>
+                  <div><small>TIPO SELECCIONADO</small><strong>{selectedTeraType ? teraTypeLabels[selectedTeraType] : 'Elige uno de los 18 tipos'}</strong><span>{selectedTeraType ? `Tera Golpe tendrá tipo ${teraTypeLabels[selectedTeraType]}.` : 'Pulsa una tarjeta para ver el tipo que usarás.'}</span></div>
+                  <span className={`tera-preview-tag ${selectedTeraType ? `tera-color-${selectedTeraType}` : ''}`}>{selectedTeraType ? teraTypeLabels[selectedTeraType] : 'Sin elegir'}</span>
+                </div>
+                <div className="tera-type-grid">{teraTypes.map((type) => <button key={type} type="button" aria-pressed={selectedTeraType === type} className={`tera-type-chip tera-color-${type} ${selectedTeraType === type ? 'selected' : ''}`} onClick={() => setSelectedTeraType(type)}><span className="tera-chip-symbol" aria-hidden="true">✦</span><span className="tera-chip-label">{teraTypeLabels[type]}</span><small>{type.toUpperCase()}</small></button>)}</div>
+                <div className="tera-picker-footer"><span>Solo puedes teracristalizar una vez por equipo.</span><button className="primary-button" type="button" disabled={!selectedTeraType} onClick={() => play('tera')}>{selectedTeraType ? `Activar Tera ${teraTypeLabels[selectedTeraType]}` : 'Selecciona un tipo'}</button></div>
+              </div>
+            )}
 
             {transformPickerOpen && active && !hasSubmitted && transformOptions.length > 0 && (
               <div className="transformation-picker" role="dialog" aria-label="Elegir transformación">
@@ -960,6 +1140,18 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
                 </div>
               </div>
             )}
+            {showHotkeys && (
+              <div className="key-settings-panel" role="dialog" aria-label="Configurar teclas de combate">
+                <div className="key-settings-heading"><div><span className="key-settings-icon" aria-hidden="true">⌨</span><div><strong>Atajos del combate</strong><small>Selecciona una acción y pulsa la tecla que quieres usar.</small></div></div><button type="button" className="key-settings-close" aria-label="Cerrar configuración de teclas" onClick={() => { setShowHotkeys(false); setCapturingHotkey(''); }}>×</button></div>
+                <div className="key-settings-grid">
+                  {[['attack','Atacar','⚔'],['teraStrike','Tera Golpe','✦'],['defend','Defender','◇'],['heal','Curar','＋'],['recover','Recargar energía','ϟ'],['switch','Cambiar Pokémon','↔'],['transform','Transformación','◆'],['tera','Teracristalizar','✧']].map(([key,label,icon]) => <div className="key-setting-row" key={key}><span className="key-setting-label"><i aria-hidden="true">{icon}</i><span>{label}</span></span><button type="button" className={capturingHotkey === key ? 'is-capturing' : ''} onClick={() => { setHotkeyMessage(''); setCapturingHotkey(key); }}>{capturingHotkey === key ? 'Pulsa tecla…' : <kbd>{String(hotkeys[key] || '').toUpperCase()}</kbd>}</button></div>)}
+                </div>
+                {capturingHotkey && <small className="key-capture-hint">Pulsa la tecla deseada. Esc cancela.</small>}
+                {hotkeyMessage && <small className="key-capture-error" role="alert">{hotkeyMessage}</small>}
+                <div className="key-settings-footer"><span>Puedes cambiar las teclas cuando quieras.</span><button type="button" className="key-reset-button" onClick={() => { setHotkeys({ attack: 'z', teraStrike: 'b', defend: 'c', heal: 'x', recover: 'r', switch: 'v', transform: 't', tera: 'g' }); setCapturingHotkey(''); setHotkeyMessage(''); }}>Restablecer</button></div>
+              </div>
+            )}
+
             {selectedTransform && active && !hasSubmitted && (
               <div className="selected-transformation-notice">
                 <span>Transformación preparada: <b>{selectedTransform.label}</b>. Elige Atacar, Defender, Curarse o Recargar energía para aplicarla este turno.</span>
@@ -984,6 +1176,11 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
             {hasSubmitted && selectedAction && (
               <p className="turn-message">Has elegido <b>{selectedAction}</b>. Esperando la jugada del rival...</p>
             )}
+            <div className={`turn-status-footer ${hasSubmitted ? 'is-waiting' : 'is-yours'} side-${me?.side || 'A'}`} role="status" aria-live="polite">
+              <span className="turn-status-light" aria-hidden="true" />
+              <strong>{hasSubmitted ? 'JUGADA ENVIADA' : 'ES TU TURNO PARA ELEGIR'}</strong>
+              <span>{hasSubmitted ? 'Esperando las acciones de los demás jugadores' : 'Elige una acción antes de que termine el tiempo'}</span>
+            </div>
           </div>
         </div>
 
@@ -1016,6 +1213,7 @@ function ArenaApp() {
   const [rooms, setRooms] = useState([]);
   const [playerName, setPlayerName] = useState('Entrenador');
   const [room, setRoom] = useState(null);
+  const [spectating, setSpectating] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [stats, setStats] = useState(loadSavedStats);
   const inspectRequestRef = useRef(0);
@@ -1031,9 +1229,9 @@ function ArenaApp() {
   // Mientras el mismo combate siga activo, se conserva la misma música para todos sus turnos.
   useEffect(() => {
     let nextScene;
-    if (screen === 'battle' && room?.phase === 'battle') {
+    if ((screen === 'battle' || screen === 'spectator') && room?.phase === 'battle') {
       nextScene = { type: 'battle', key: room.matchId || room.code, trackIndex: room.audioTrackIndex };
-    } else if (screen === 'battle' && room?.phase === 'finished') {
+    } else if ((screen === 'battle' || screen === 'spectator') && room?.phase === 'finished') {
       nextScene = { type: 'finished', key: room.matchId || room.code, winnerSide: room.winnerSide };
     } else if (screen === 'intro') {
       nextScene = { type: 'intro', key: 'intro' };
@@ -1088,17 +1286,29 @@ function ArenaApp() {
           setRooms(incoming.rooms || []);
           break;
         case 'ROOM_CREATED':
+        case 'SPECTATE_JOINED':
         case 'STATE': {
           const nextRoom = incoming.room;
-          if (nextRoom.phase === 'rematch_lobby' && room?.phase !== 'rematch_lobby') setSelectedTeam([]);
+          const isSpectating = Boolean(incoming.spectating || incoming.type === 'SPECTATE_JOINED');
+          setSpectating(isSpectating);
+          if (!isSpectating && nextRoom.phase === 'rematch_lobby' && room?.phase !== 'rematch_lobby') setSelectedTeam([]);
           setRoom(nextRoom);
-          if (nextRoom.phase === 'battle') setScreen('battle');
+          if (isSpectating) setScreen('spectator');
+          else if (nextRoom.phase === 'battle') setScreen('battle');
           else if (nextRoom.phase === 'rematch_lobby') setScreen((current) => current === 'rematch_team' ? current : 'rematch_lobby');
           else if (nextRoom.phase === 'finished') setScreen('battle');
           else setScreen('rooms');
           break;
         }
+        case 'SPECTATOR_LEFT':
+        case 'ROOM_CLOSED':
+          setRoom(null);
+          setSpectating(false);
+          setScreen('rooms');
+          if (incoming.message) window.alert(incoming.message);
+          break;
         case 'REMATCH_CANCELLED':
+          setSpectating(false);
           setRoom(null);
           setSelectedTeam([]);
           setInspectedPokemon(null);
@@ -1115,6 +1325,7 @@ function ArenaApp() {
 
   useEffect(() => {
     if (!room) return;
+    if (spectating) { setScreen('spectator'); return; }
     const needed = room.mode === 'duos' ? 4 : 2;
     if (room.phase === 'battle') {
       setScreen('battle');
@@ -1123,7 +1334,7 @@ function ArenaApp() {
     } else if (room.players.length >= needed && room.phase === 'lobby') {
       setScreen('battle');
     }
-  }, [room]);
+  }, [room, spectating]);
 
   useEffect(() => {
     if (screen === 'rooms' && connected) send({ type: 'LIST_ROOMS' });
@@ -1235,6 +1446,7 @@ function ArenaApp() {
 
   function leaveRoom() {
     send({ type: 'LEAVE_ROOM' });
+    setSpectating(false);
     setRoom(null);
     setScreen('rooms');
     send({ type: 'LIST_ROOMS' });
@@ -1278,7 +1490,7 @@ function ArenaApp() {
 
   return (
     <div className="app-shell" data-offline-mode={catalog.offline ? 'true' : 'false'}>
-      {screen === 'intro' && <PokedexIntro onContinue={() => { playSelection(); setScreen('team'); }} onPokemonCry={playPokemonCry} />}
+      {screen === 'intro' && <><PokedexIntro onContinue={() => { playSelection(); setScreen('team'); }} onPokemonCry={playPokemonCry} />{showStatsModal && <ResultsPanel stats={stats} onClose={() => setShowStatsModal(false)} />}</>}
 
       {(screen === 'team' || screen === 'rematch_team') && (
         <>
@@ -1318,7 +1530,7 @@ function ArenaApp() {
       {screen === 'rooms' && (
         <>
           <div className="page-toolbar">
-            {!room && <button className="ghost-button" type="button" onClick={() => setScreen('team')}>Editar equipo ({selectedTeam.length}/6)</button>}
+            {!room && <button className="return-menu-button" type="button" onClick={() => setScreen('intro')}>Volver al menú principal</button>}
             <span className="socket-url">{socketUrl}</span>
           </div>
           {!connected && <div className="error-banner">{connectionError || 'Conecta el servidor Node para jugar en red.'}</div>}
@@ -1329,6 +1541,7 @@ function ArenaApp() {
             rooms={rooms}
             onCreate={createRoom}
             onJoin={joinRoom}
+            onSpectate={(code) => send({ type: 'SPECTATE_ROOM', code, name: playerName.trim() || 'Espectador' })}
             onRefresh={() => send({ type: 'LIST_ROOMS' })}
             currentRoom={room}
             onLeave={leaveRoom}
@@ -1351,6 +1564,10 @@ function ArenaApp() {
           onCancelRematch={cancelRematch}
           send={send}
         />
+      )}
+
+      {screen === 'spectator' && room && (
+        <SpectatorScreen room={room} onLeave={leaveRoom} send={send} />
       )}
 
       {screen === 'battle' && room && (

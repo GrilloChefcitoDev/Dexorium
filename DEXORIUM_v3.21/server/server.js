@@ -16,7 +16,14 @@ const FORCE_POKEAPI_OFFLINE = process.env.POKEAPI_OFFLINE === '1';
 const POKEAPI_TIMEOUT_MS = 2600;
 const POKEAPI_COOLDOWN_MS = 45_000;
 let pokeApiOfflineUntil = 0;
-const TURN_DURATION_MS = Math.max(5_000, Number(process.env.TURN_DURATION_MS || 30_000));
+const TURN_DURATION_MS = Math.max(5_000, Number(process.env.TURN_DURATION_MS || 45_000));
+const STANDARD_TURN_DURATION_MS = 30_000;
+
+// Damos un poco más de tiempo por defecto; si alguien ya acumuló dos AFK, el próximo plazo se acorta.
+function getTurnDuration(room) {
+  const repeatedAfk = [...room.players.values()].some((player) => (player.afkTurns || 0) >= 2);
+  return repeatedAfk ? Math.min(TURN_DURATION_MS, STANDARD_TURN_DURATION_MS) : TURN_DURATION_MS;
+}
 
 const rooms = new Map();
 const connections = new Set();
@@ -116,7 +123,7 @@ function cleanRoom(room, currentPlayer) {
     matchId: room.matchId,
     audioTrackIndex: room.audioTrackIndex,
     turnStartedAt: room.turnStartedAt,
-    turnDurationMs: TURN_DURATION_MS,
+    turnDurationMs: room.currentTurnDurationMs || getTurnDuration(room),
     mode: room.mode,
     visibility: room.visibility,
     maxPlayers: room.maxPlayers,
@@ -129,6 +136,7 @@ function cleanRoom(room, currentPlayer) {
       A: { ...(room.transformationUsage?.A || { dynamaxUsed: false, gigantamaxUsed: false }) },
       B: { ...(room.transformationUsage?.B || { dynamaxUsed: false, gigantamaxUsed: false }) },
     },
+    teraUsage: { A: Boolean(room.teraUsage?.A), B: Boolean(room.teraUsage?.B) },
     players,
     pendingPlayerIds: [...room.pendingActions.keys()],
     waitingForSwitchIds: [...room.waitingForSwitch],
@@ -136,6 +144,8 @@ function cleanRoom(room, currentPlayer) {
     logs: room.logs.slice(-100),
     chatMessages: room.chatMessages || [],
     effects: room.effects || [],
+    spectatorCount: room.spectators?.size || 0,
+    spectatorNames: room.spectators ? [...room.spectators.values()].map((spectator) => spectator.name) : [],
     me: currentPlayer ? cleanPlayer(currentPlayer) : null,
   };
 }
@@ -174,25 +184,31 @@ function finishForAfk(room, offenders) {
 
 function broadcastState(room) {
   for (const player of room.players.values()) {
-    sendJson(player.client, { type: 'STATE', room: cleanRoom(room, player) });
+    sendJson(player.client, { type: 'STATE', room: cleanRoom(room, player), spectating: false });
   }
+  for (const [client] of room.spectators || []) {
+    sendJson(client, { type: 'STATE', room: cleanRoom(room, null), spectating: true });
+  }
+  broadcastRoomList();
 }
 
 function broadcastRoomList() {
   const roomsPublic = [...rooms.values()]
-    .filter((room) => room.visibility === 'public' && room.phase === 'lobby')
+    .filter((room) => room.visibility === 'public' && ['lobby', 'battle'].includes(room.phase))
     .map((room) => ({
       code: room.code,
       mode: room.mode,
       players: room.players.size,
       maxPlayers: room.maxPlayers,
       protected: Boolean(room.password),
+      phase: room.phase,
+      turn: room.turn,
+      spectators: room.spectators?.size || 0,
     }));
 
   for (const client of connections) {
-    // Los jugadores dentro de una sala no necesitan la lista de salas. Evita que
-    // ROOM_LIST sobrescriba el STATE recién enviado en el cliente.
-    if (!getRoomForClient(client)) sendJson(client, { type: 'ROOM_LIST', rooms: roomsPublic });
+    // Las salas activas también se anuncian para que otros entren como espectadores.
+    if (!getRoomForClient(client) && !getSpectatedRoomForClient(client)) sendJson(client, { type: 'ROOM_LIST', rooms: roomsPublic });
   }
 }
 
@@ -214,6 +230,57 @@ function getRoomForClient(client) {
     if (player && player.client === client) return room;
   }
   return null;
+}
+
+function getSpectatedRoomForClient(client) {
+  const code = client.spectatorRoomCode;
+  if (!code) return null;
+  const room = rooms.get(code);
+  return room?.spectators?.has(client) ? room : null;
+}
+
+function leaveSpectatorRoom(client, announce = true) {
+  const room = getSpectatedRoomForClient(client);
+  if (!room) { client.spectatorRoomCode = null; client.spectatorName = null; return; }
+  const spectator = room.spectators.get(client);
+  room.spectators.delete(client);
+  client.spectatorRoomCode = null;
+  client.spectatorName = null;
+  if (announce && spectator) addLog(room, `${spectator.name} dejó de observar el combate.`, 'event', spectator.name, 'S');
+  if (rooms.get(room.code) === room) broadcastState(room);
+  broadcastRoomList();
+}
+
+function spectateRoom(client, message) {
+  if (getRoomForClient(client)) throw new Error('Sal de tu sala actual antes de observar otra partida.');
+  if (client.spectatorRoomCode) leaveSpectatorRoom(client, false);
+  const code = String(message.code || '').trim().toUpperCase();
+  const room = rooms.get(code);
+  if (!room || room.visibility !== 'public' || !['battle', 'finished'].includes(room.phase)) {
+    throw new Error('Esa sala no tiene un combate público disponible para observar.');
+  }
+  if ((room.spectators?.size || 0) >= 30) throw new Error('La sala ya alcanzó el límite de espectadores.');
+  room.spectators ||= new Map();
+  const fallbackName = `Espectador ${room.spectators.size + 1}`;
+  const name = String(message.name || fallbackName).trim().slice(0, 18) || fallbackName;
+  room.spectators.set(client, { name });
+  client.playerId = null;
+  client.spectatorRoomCode = room.code;
+  client.spectatorName = name;
+  addLog(room, `${name} está observando la partida.`, 'event', name, 'S');
+  sendJson(client, { type: 'SPECTATE_JOINED', room: cleanRoom(room, null), spectating: true });
+  broadcastState(room);
+  broadcastRoomList();
+}
+
+function addSpectatorChat(room, client, message) {
+  const spectator = room.spectators.get(client);
+  if (!spectator) throw new Error('Ya no estás observando esta sala.');
+  const text = validateChatMessage(message.message);
+  room.chatMessages.push({ id: crypto.randomUUID(), time: new Date().toISOString(), text, author: spectator.name, authorSide: 'S' });
+  room.chatMessages = room.chatMessages.slice(-200);
+  addLog(room, text, 'chat', spectator.name, 'S');
+  broadcastState(room);
 }
 
 function findPlayerById(room, id) {
@@ -393,6 +460,27 @@ function resolveAction(room, player, packet) {
     return;
   }
 
+  if (packet.action === 'tera') {
+    const type = String(packet.teraType || '').toLowerCase();
+    const validTypes = new Set(['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy']);
+    if (!validTypes.has(type) || room.teraUsage?.[player.side] || actor.teraType) throw new Error('La teracristalización ya fue usada o el tipo no es válido.');
+    actor.originalTypes = [...(actor.originalTypes || actor.types || [])];
+    actor.types = [type];
+    actor.teraType = type;
+    actor.actions.teraStrike = {
+      id: 'attack',
+      name: `Tera Golpe ${type[0].toUpperCase()}${type.slice(1)}`,
+      type,
+      power: Math.max(35, Number(actor.actions.attack?.power || 35) + 10),
+      energyCost: 25,
+    };
+    room.teraUsage ||= { A: false, B: false };
+    room.teraUsage[player.side] = true;
+    addLog(room, `${player.name} teracristalizó a ${actor.name} al tipo ${type}. Ahora puede usar Tera Golpe.`, 'transformation', player.name, player.side);
+    addEffect(room, { kind: 'tera', side: player.side, pokemonId: actor.id, teraType: type, icon: '💎' });
+    return;
+  }
+
   const action = actor.actions[packet.action];
   if (!action) throw new Error('La accion no existe.');
   if (actor.energy < action.energyCost) throw new Error('No tienes energia suficiente.');
@@ -542,6 +630,7 @@ function resolveTurn(room) {
     regenerateEnergy(room);
     room.turn += 1;
     room.turnStartedAt = Date.now();
+    room.currentTurnDurationMs = getTurnDuration(room);
     room.pendingActions.clear();
   } else {
     room.pendingActions.clear();
@@ -555,6 +644,7 @@ function startIfReady(room) {
   chooseInitialActives(room);
   room.phase = 'battle';
   room.turnStartedAt = Date.now();
+  room.currentTurnDurationMs = getTurnDuration(room);
   addLog(room, room.mode === 'duos' ? 'Comienza la batalla DUOS 2v2.' : 'Comienza el combate 1v1.');
   return true;
 }
@@ -575,13 +665,16 @@ async function createRoom(client, message) {
     phase: 'lobby',
     turn: 1,
     turnStartedAt: Date.now(),
+    currentTurnDurationMs: TURN_DURATION_MS,
     winnerSide: null,
     players: new Map(),
+    spectators: new Map(),
     pendingActions: new Map(),
     waitingForSwitch: new Set(),
     rematchVotes: new Set(),
     rematchRequest: null,
     transformationUsage: { A: { dynamaxUsed: false, gigantamaxUsed: false }, B: { dynamaxUsed: false, gigantamaxUsed: false } },
+    teraUsage: { A: false, B: false },
     logs: [],
     chatMessages: [],
     effects: [],
@@ -675,12 +768,14 @@ function beginRematchPreparation(room, request, acceptingPlayer) {
   room.audioTrackIndex = availableMusicIndexes[Math.floor(Math.random() * availableMusicIndexes.length)];
   room.turn = 1;
   room.turnStartedAt = Date.now();
+  room.currentTurnDurationMs = getTurnDuration(room);
   room.winnerSide = null;
   room.pendingActions.clear();
   room.waitingForSwitch.clear();
   room.rematchVotes.clear();
   room.rematchRequest = null;
   room.transformationUsage = { A: { dynamaxUsed: false, gigantamaxUsed: false }, B: { dynamaxUsed: false, gigantamaxUsed: false } };
+  room.teraUsage = { A: false, B: false };
   room.effects = [];
 
   for (const p of room.players.values()) {
@@ -772,6 +867,7 @@ async function handleConfirmRematchTeam(client, room, player, message) {
       chooseInitialActives(room);
       room.turn = 1;
       room.turnStartedAt = Date.now();
+      room.currentTurnDurationMs = getTurnDuration(room);
       room.winnerSide = null;
       room.pendingActions.clear();
       room.waitingForSwitch.clear();
@@ -817,8 +913,15 @@ function leaveRoom(client) {
   room.waitingForSwitch.delete(player.id);
   client.playerId = null;
 
-  if (room.players.size === 0) rooms.delete(room.code);
-  else broadcastState(room);
+  if (room.players.size === 0) {
+    for (const [spectatorClient] of room.spectators || []) {
+      sendJson(spectatorClient, { type: 'ROOM_CLOSED', message: 'La sala cerró porque todos los jugadores salieron.' });
+      spectatorClient.spectatorRoomCode = null;
+      spectatorClient.spectatorName = null;
+    }
+    room.spectators?.clear();
+    rooms.delete(room.code);
+  } else broadcastState(room);
   broadcastRoomList();
 }
 
@@ -834,6 +937,22 @@ async function handleMessage(client, rawMessage) {
   try {
     if (message.type === 'LIST_ROOMS') {
       broadcastRoomList();
+      return;
+    }
+
+    if (message.type === 'SPECTATE_ROOM') {
+      spectateRoom(client, message);
+      return;
+    }
+    if (message.type === 'LEAVE_ROOM' && client.spectatorRoomCode) {
+      leaveSpectatorRoom(client);
+      sendJson(client, { type: 'SPECTATOR_LEFT' });
+      return;
+    }
+    if (message.type === 'CHAT_MESSAGE' && client.spectatorRoomCode) {
+      const spectatorRoom = getSpectatedRoomForClient(client);
+      if (!spectatorRoom) throw new Error('La sala que observabas ya no está disponible.');
+      addSpectatorChat(spectatorRoom, client, message);
       return;
     }
 
@@ -900,8 +1019,8 @@ async function handleMessage(client, rawMessage) {
       if (room.waitingForSwitch.has(player.id)) throw new Error('Debes elegir tu siguiente Pokemon.');
       if (room.waitingForSwitch.size > 0) throw new Error('Espera a que el rival elija su siguiente Pokemon.');
       if (room.pendingActions.has(player.id)) throw new Error('Ya enviaste tu jugada de este turno.');
-      if (!['attack', 'defend', 'heal', 'recover', 'switch'].includes(message.action)) throw new Error('Accion no valida.');
-      if (message.transformKey && message.action === 'switch') throw new Error('No puedes transformar y cambiar de Pokémon en el mismo turno.');
+      if (!['attack', 'teraStrike', 'tera', 'defend', 'heal', 'recover', 'switch'].includes(message.action)) throw new Error('Accion no valida.');
+      if (message.transformKey && ['switch', 'tera'].includes(message.action)) throw new Error('No puedes usar dos transformaciones o transformar y cambiar en el mismo turno.');
 
       const active = player.activeId ? findPokemon(player, player.activeId) : null;
       if (!active || active.currentHp <= 0 || Number(message.pokemonId) !== Number(active.id)) {
@@ -913,15 +1032,19 @@ async function handleMessage(client, rawMessage) {
       if (message.action === 'switch') {
         const next = findPokemon(player, message.switchPokemonId);
         if (!next || next.currentHp <= 0 || next.id === active.id) throw new Error('El Pokémon elegido para cambiar no es válido.');
+      } else if (message.action === 'tera') {
+        const validTypes = new Set(['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy']);
+        if (!validTypes.has(String(message.teraType || '').toLowerCase())) throw new Error('El tipo Tera seleccionado no es válido.');
+        if (room.teraUsage?.[player.side] || active.teraType) throw new Error('Tu equipo ya usó la teracristalización en este combate.');
       } else {
         const action = active.actions[message.action];
         if (!action) throw new Error('La acción no existe.');
         if (active.energy < action.energyCost) throw new Error('No tienes energía suficiente para esa acción.');
         if (message.action === 'recover' && active.energy >= MAX_ENERGY) throw new Error('Tu energía ya está al máximo.');
-        if (message.action === 'attack' || ['heal', 'defend'].includes(message.action) && (message.targetPlayerId != null || message.targetPokemonId != null)) {
+        if (['attack', 'teraStrike'].includes(message.action) || ['heal', 'defend'].includes(message.action) && (message.targetPlayerId != null || message.targetPokemonId != null)) {
           const targetPlayer = findPlayerById(room, message.targetPlayerId);
           const targetPokemon = targetPlayer ? findPokemon(targetPlayer, message.targetPokemonId) : null;
-          validateTargetForAction(message.action, player, targetPlayer, targetPokemon);
+          validateTargetForAction(message.action === 'teraStrike' ? 'attack' : message.action, player, targetPlayer, targetPokemon);
         }
       }
 
@@ -936,6 +1059,7 @@ async function handleMessage(client, rawMessage) {
         targetPokemonId: message.targetPokemonId ? Number(message.targetPokemonId) : null,
         switchPokemonId: message.switchPokemonId ? Number(message.switchPokemonId) : null,
         transformKey: message.transformKey ? String(message.transformKey).slice(0, 80) : null,
+        teraType: message.teraType ? String(message.teraType).toLowerCase() : null,
       });
 
       if (room.pendingActions.size >= activePlayers(room).length) resolveTurn(room);
@@ -955,7 +1079,10 @@ async function handleMessage(client, rawMessage) {
       addEffect(room, { kind: 'switch', side: player.side, icon: '✨', pokemonId: candidate.id });
       room.waitingForSwitch.delete(player.id);
       addLog(room, `envio a ${candidate.name}.`, 'event', player.name, player.side);
-      if (room.waitingForSwitch.size === 0 && room.pendingActions.size === 0) room.turnStartedAt = Date.now();
+      if (room.waitingForSwitch.size === 0 && room.pendingActions.size === 0) {
+        room.turnStartedAt = Date.now();
+        room.currentTurnDurationMs = getTurnDuration(room);
+      }
       broadcastState(room);
       return;
     }
@@ -1020,7 +1147,7 @@ function tickRoomTimers() {
   const now = Date.now();
   for (const room of rooms.values()) {
     if (room.phase !== 'battle') continue;
-    if (now - room.turnStartedAt < TURN_DURATION_MS) continue;
+    if (now - room.turnStartedAt < (room.currentTurnDurationMs || getTurnDuration(room))) continue;
 
     // Si falta una sustitución, el servidor elige un Pokémon vivo al azar.
     if (room.waitingForSwitch.size > 0) {
@@ -1056,7 +1183,10 @@ function tickRoomTimers() {
         broadcastState(room);
         continue;
       }
-      if (room.waitingForSwitch.size === 0) room.turnStartedAt = Date.now();
+      if (room.waitingForSwitch.size === 0) {
+        room.turnStartedAt = Date.now();
+        room.currentTurnDurationMs = getTurnDuration(room);
+      }
       if (selectedAny) broadcastState(room);
       continue;
     }
@@ -1143,17 +1273,19 @@ export function startGameServer() {
 
     client.on('message', (message) => handleMessage(client, message.toString()));
     client.on('close', () => {
+      leaveSpectatorRoom(client);
       leaveRoom(client);
       connections.delete(client);
     });
     client.on('error', () => {
+      leaveSpectatorRoom(client);
       leaveRoom(client);
       connections.delete(client);
     });
 
     const roomsPublic = [...rooms.values()]
-      .filter((room) => room.visibility === 'public' && room.phase === 'lobby')
-      .map((room) => ({ code: room.code, mode: room.mode, players: room.players.size, maxPlayers: room.maxPlayers, protected: Boolean(room.password) }));
+      .filter((room) => room.visibility === 'public' && ['lobby', 'battle'].includes(room.phase))
+      .map((room) => ({ code: room.code, mode: room.mode, players: room.players.size, maxPlayers: room.maxPlayers, protected: Boolean(room.password), phase: room.phase, turn: room.turn, spectators: room.spectators?.size || 0 }));
     sendJson(client, { type: 'ROOM_LIST', rooms: roomsPublic });
   });
 

@@ -7,6 +7,8 @@ const FORCE_LOCAL_MODE = import.meta.env?.VITE_POKEAPI_OFFLINE === '1';
 const CATALOG_STORAGE_KEY = 'dexorium-pokemon-catalog-cache-v2';
 const DETAILS_STORAGE_KEY = 'dexorium-pokemon-details-cache-v2';
 const DETAIL_CACHE_LIMIT = 220;
+const TYPE_CATALOG_STORAGE_KEY = 'dexorium-pokemon-type-cache-v1';
+const typeCatalogCache = new Map();
 const REQUEST_TIMEOUT_MS = 3200;
 const OFFLINE_COOLDOWN_MS = 30_000;
 
@@ -228,4 +230,62 @@ export async function getPokemon(identifier) {
 export async function getPokemonTeam(ids) {
   if (!Array.isArray(ids)) throw new Error('La lista de Pokémon no es válida.');
   return Promise.all(ids.map((id) => getPokemon(id)));
+}
+
+
+// Los filtros por tipo se cargan cuando el jugador los abre, no al arrancar toda la galería.
+// Si la API no responde, usamos las fichas que ya están guardadas y las del catálogo local.
+export async function getPokemonCatalogByType(typeName) {
+  const type = String(typeName || '').trim().toLowerCase();
+  const supportedTypes = new Set([
+    'normal', 'fire', 'water', 'electric', 'grass', 'ice', 'fighting', 'poison', 'ground',
+    'flying', 'psychic', 'bug', 'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy',
+  ]);
+  if (!supportedTypes.has(type)) throw new Error('El tipo seleccionado no es válido.');
+  if (typeCatalogCache.has(type)) return typeCatalogCache.get(type);
+
+  const storage = safeLocalStorage();
+  if (storage) {
+    try {
+      const cached = JSON.parse(storage.getItem(TYPE_CATALOG_STORAGE_KEY) || '{}');
+      if (Array.isArray(cached[type]) && cached[type].length) {
+        typeCatalogCache.set(type, cached[type]);
+        return cached[type];
+      }
+    } catch { /* Si la caché se dañó, consultamos o reconstruimos la lista. */ }
+  }
+
+  try {
+    const response = await requestJson(`${API_URL}/type/${type}`);
+    const results = (response.pokemon || []).map(({ pokemon }) => ({ name: pokemon.name, url: pokemon.url }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (!results.length) throw new Error('La API no devolvió Pokémon de este tipo.');
+    typeCatalogCache.set(type, results);
+    if (storage) {
+      try {
+        const saved = JSON.parse(storage.getItem(TYPE_CATALOG_STORAGE_KEY) || '{}');
+        saved[type] = results;
+        storage.setItem(TYPE_CATALOG_STORAGE_KEY, JSON.stringify(saved));
+      } catch { /* La búsqueda sigue funcionando aunque localStorage esté lleno. */ }
+    }
+    return results;
+  } catch {
+    const known = new Map();
+    hydrateStoredDetails();
+    for (const pokemon of Object.values(storedDetails)) {
+      if ((pokemon.types || []).some((entry) => entry.type?.name === type)) {
+        known.set(Number(pokemon.id), { name: pokemon.name, url: `${API_URL}/pokemon/${pokemon.id}/` });
+      }
+    }
+    const offline = makeOfflineCatalog();
+    for (const entry of offline.results) {
+      const id = Number(String(entry.url || '').match(/(\d+)\/?$/)?.[1]);
+      if (!id) continue;
+      const pokemon = makeOfflinePokemon(id, entry.name);
+      if (pokemon?.types?.some((item) => item.type.name === type)) known.set(id, { name: pokemon.name, url: entry.url });
+    }
+    const results = [...known.values()].sort((a, b) => a.name.localeCompare(b.name));
+    typeCatalogCache.set(type, results);
+    return results;
+  }
 }

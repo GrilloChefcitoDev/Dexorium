@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { calculateBattleStats, createActions } from '../../shared/cardRules';
+import { getPokemonCatalogByType } from '../services/pokeApi';
 
 const PAGE_SIZE = 12;
 
@@ -20,20 +21,47 @@ export default function TeamBuilder({ catalog, selectedTeam, onSelect, onRemove,
   const [randomError, setRandomError] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [letterFilter, setLetterFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [onlyAvailable, setOnlyAvailable] = useState(false);
+  const [typeResults, setTypeResults] = useState(null);
+  const [typeLoading, setTypeLoading] = useState(false);
+  const [typeError, setTypeError] = useState('');
+
+  useEffect(() => {
+    if (typeFilter === 'all') { setTypeResults(null); setTypeError(''); setTypeLoading(false); return undefined; }
+    let cancelled = false;
+    setTypeLoading(true);
+    setTypeResults([]);
+    setTypeError('');
+    getPokemonCatalogByType(typeFilter)
+      .then((entries) => { if (!cancelled) setTypeResults(entries); })
+      .catch(() => { if (!cancelled) { setTypeResults([]); setTypeError('No se pudo cargar el filtro por tipo. Puedes seguir buscando por nombre o letra.'); } })
+      .finally(() => { if (!cancelled) setTypeLoading(false); });
+    return () => { cancelled = true; };
+  }, [typeFilter]);
+
   const filtered = useMemo(() => {
-    const value = search.trim().toLowerCase();
-    const result = catalog.results.filter((entry) => !value || entry.name.includes(value));
-    // Sin conexión se puede buscar directamente por ID aunque el Pokémon no esté en el
-    // pequeño catálogo de respaldo. pokeApi.js construye una ficha local si no hay caché.
-    if (/^#?\d+$/.test(value)) {
-      const id = Number(value.replace('#', ''));
+    const value = search.trim().toLowerCase().replace(/^#/, '');
+    const source = typeFilter === 'all' || typeResults === null ? (catalog.results || []) : typeResults;
+    let result = source.filter((entry) => {
+      const id = Number(String(entry.url || '').match(/(\d+)\/?$/)?.[1]) || 0;
+      const nameMatches = !value || entry.name.toLowerCase().includes(value) || String(id) === value;
+      const letterMatches = letterFilter === 'all' || entry.name.toLowerCase().startsWith(letterFilter);
+      const availableMatches = !onlyAvailable || !blockedIds.map(Number).includes(id);
+      return nameMatches && letterMatches && availableMatches;
+    });
+    // En modo sin conexión también se puede localizar una ficha por su ID.
+    if (/^\d+$/.test(value) && typeFilter === 'all' && letterFilter === 'all') {
+      const id = Number(value);
       const alreadyListed = result.some((entry) => Number(String(entry.url || '').match(/(\d+)\/?$/)?.[1]) === id);
-      if (id > 0 && id <= 20000 && !alreadyListed) {
+      if (id > 0 && id <= 20000 && !alreadyListed && (!onlyAvailable || !blockedIds.map(Number).includes(id))) {
         result.unshift({ name: `pokemon-${id}`, url: `https://pokeapi.co/api/v2/pokemon/${id}/`, offlineGenerated: true });
       }
     }
     return result;
-  }, [catalog.results, search]);
+  }, [catalog.results, search, typeFilter, typeResults, letterFilter, onlyAvailable, blockedIds]);
 
   // Cuando escribimos otra busqueda, la lista cambia de tamaño.
   // Volvemos a la primera pagina para no quedar mostrando una pagina vacia.
@@ -109,7 +137,15 @@ export default function TeamBuilder({ catalog, selectedTeam, onSelect, onRemove,
               placeholder="Buscar cualquier Pokémon..."
               aria-label="Buscar cualquier Pokémon"
             />
-            <span>{filtered.length.toLocaleString()} resultados</span>
+            <div className="search-meta-row"><span>{filtered.length.toLocaleString()} resultados</span><button className="filter-toggle" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}>{filtersOpen ? 'Cerrar filtros −' : 'Filtros ☷'}</button></div>
+            {filtersOpen && <div className="gallery-filter-panel">
+              <label>Primera letra<select value={letterFilter} onChange={(event) => { setLetterFilter(event.target.value); setPage(0); }}><option value="all">Todas</option>{'abcdefghijklmnopqrstuvwxyz'.split('').map((letter) => <option key={letter} value={letter}>{letter.toUpperCase()}</option>)}</select></label>
+              <label>Tipo<select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); setPage(0); }}><option value="all">Todos los tipos</option>{['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy'].map((type) => <option value={type} key={type}>{type[0].toUpperCase() + type.slice(1)}</option>)}</select></label>
+              <label className="filter-check"><input type="checkbox" checked={onlyAvailable} onChange={(event) => { setOnlyAvailable(event.target.checked); setPage(0); }} />Ocultar Pokémon bloqueados</label>
+              {typeLoading && <small role="status">Buscando Pokémon de ese tipo…</small>}
+              {typeError && <small className="filter-error" role="alert">{typeError}</small>}
+              <button className="ghost-button filter-reset" type="button" onClick={() => { setSearch(''); setLetterFilter('all'); setTypeFilter('all'); setOnlyAvailable(false); setPage(0); }}>Limpiar filtros</button>
+            </div>}
           </div>
 
           <div className="team-mini-list">
@@ -131,7 +167,7 @@ export default function TeamBuilder({ catalog, selectedTeam, onSelect, onRemove,
 
         <div className="dex-grid-wrap">
           {filtered.length === 0 ? (
-            <div className="empty-state"><h2>No se encontró ese Pokémon</h2><p>Prueba con otro nombre.</p></div>
+            <div className="empty-state"><h2>{typeLoading ? 'Buscando Pokémon…' : 'No se encontró ese Pokémon'}</h2><p>{typeLoading ? 'Un momento, estamos preparando el filtro.' : typeFilter !== 'all' ? 'No hay resultados disponibles para ese tipo en la caché actual. Prueba otro filtro o vuelve a Todos los tipos.' : 'Prueba con otro nombre, número o letra.'}</p></div>
           ) : (
             <div className="dex-grid">
               {pageItems.map((entry) => (
