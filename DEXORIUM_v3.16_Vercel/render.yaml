@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: dexorium-game-server
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
