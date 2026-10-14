@@ -7,7 +7,7 @@ import { findTransformationOption, applyTransformationToCard, getSpecialKoTransf
 import { normalizeTeamIds, validateChatMessage } from '../shared/partialRules.js';
 import { makeServerOfflinePokemon } from '../shared/offlinePokemon.js';
 import { createRematchRequest, validateRematchDecision, cancelRematchRequest, getPokemonIdsBlockedAfterFaint } from '../shared/rematchRules.js';
-import { validateTargetForAction } from '../shared/combatTargets.js';
+import { validateTargetForAction, getResolvedTargetPokemon } from '../shared/combatTargets.js';
 
 const HOST = '0.0.0.0';
 const PORT = Number(process.env.PORT || 8080);
@@ -498,7 +498,11 @@ function resolveAction(room, player, packet) {
   const hasExplicitTarget = packet.targetPlayerId != null && packet.targetPokemonId != null;
   if (action.id === 'attack' || (['heal', 'defend'].includes(action.id) && hasExplicitTarget)) {
     targetPlayer = findPlayerById(room, packet.targetPlayerId);
-    target = targetPlayer ? findPokemon(targetPlayer, packet.targetPokemonId) : null;
+    const selectedTarget = targetPlayer ? findPokemon(targetPlayer, packet.targetPokemonId) : null;
+
+    // El Pokémon objetivo puede cambiar mientras se eligen las jugadas.
+    // Los ataques siempre buscan al Pokémon que esté activo al aplicar el daño.
+    target = getResolvedTargetPokemon(action.id, targetPlayer, selectedTarget);
     validateTargetForAction(action.id, player, targetPlayer, target);
   }
 
@@ -582,9 +586,31 @@ function resolveTurn(room) {
     addLog(room, `Turno ${room.turn}: ${choiceText}.`, 'choice', player.name, player.side);
   }
 
-  // Después se resuelven en orden de velocidad, respetando el funcionamiento
-  // actual del combate y evitando ejecutar una acción inválida.
+  // Primero se aplican todos los cambios de Pokémon.
+  // Así, los ataques de este turno golpean al Pokémon que acaba de entrar,
+  // sin importar cuál de los dos jugadores envió su acción primero.
   for (const packet of packets) {
+    if (packet.action !== 'switch') continue;
+
+    const player = room.players.get(packet.playerId);
+    if (!player?.activeId || room.waitingForSwitch.has(player.id)) continue;
+
+    const outgoing = findPokemon(player, player.activeId);
+    const incoming = findPokemon(player, packet.switchPokemonId);
+    if (!outgoing || outgoing.currentHp <= 0 || !incoming || incoming.currentHp <= 0) continue;
+    if (Number(packet.pokemonId) !== Number(outgoing.id) || Number(incoming.id) === Number(outgoing.id)) continue;
+
+    player.activeId = incoming.id;
+    player.lastActiveId = incoming.id;
+    addLog(room, `cambio de ${outgoing.name} a ${incoming.name}.`, 'event', player.name, player.side);
+    addEffect(room, { kind: 'switch', side: player.side, icon: '✨', pokemonId: incoming.id });
+  }
+
+  // Después se resuelven las acciones restantes en orden de velocidad.
+  for (const packet of packets) {
+    // El cambio ya se aplicó en el bloque anterior, así que no debe ejecutarse dos veces.
+    if (packet.action === 'switch') continue;
+
     const player = room.players.get(packet.playerId);
     if (!player?.activeId || room.waitingForSwitch.has(player.id)) continue;
     const active = findPokemon(player, player.activeId);

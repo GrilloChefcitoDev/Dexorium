@@ -11,6 +11,7 @@ import { POKEMON_EMOJIS } from './data/pokemonEmojis';
 import { AudioProvider, useArenaAudio } from './audio/AudioManager';
 import { chooseUniquePokemonIds, recordMatchResultOnce, validateChatMessage } from '../shared/partialRules.js';
 import { getFaintedPokemonCount, getWinnerTrainerLabel } from '../shared/spectatorScore.js';
+import { getHealthBarClass } from '../shared/healthBar.js';
 
 const STATS_STORAGE_KEY = 'pokemon-arena-results';
 
@@ -104,7 +105,7 @@ function TeamPanel({ team, blockedIds = [], showBlocked = false }) {
               {pokemon.transformation?.label && <small className="mini-transformation-label">{pokemon.transformation.label}</small>}
               {isBlockedForRematch && <small className="team-blocked-tag">Bloqueado para revancha</small>}
               <div className="hp-track">
-                <span style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} />
+                <span className={getHealthBarClass(pokemon.currentHp, pokemon.battleStats.hp)} style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} />
               </div>
               <small>{Math.max(0, pokemon.currentHp)} / {pokemon.battleStats.hp}</small>
             </div>
@@ -254,13 +255,13 @@ function useFloatingWindow({ width: baseWidth, height: baseHeight, initialX, ini
     gestureRef.current = { mode: 'resize', direction, startX: event.clientX, startY: event.clientY, left: position.x, top: position.y, width: size.width, height: size.height };
   }
 
-  function hide(preferredEdge = null) {
+  function hide() {
     const distances = [
       { edge: 'top', distance: Math.max(0, position.y) },
       { edge: 'left', distance: Math.max(0, position.x) },
       { edge: 'right', distance: Math.max(0, window.innerWidth - position.x - size.width) },
     ].sort((a, b) => a.distance - b.distance);
-    const edge = ['top', 'left', 'right'].includes(preferredEdge) ? preferredEdge : distances[0].edge;
+    const edge = distances[0].edge;
     const tabWidth = edge === 'top' ? 128 : (window.innerWidth <= 560 ? 96 : 112);
     const tabHeight = edge === 'top' ? 34 : 36;
     let x = position.x;
@@ -317,17 +318,9 @@ function FloatingWindowTab({ edge, onClick, label }) {
 }
 
 function BattleSidebar({ room }) {
-  const floating = useFloatingWindow({ width: 350, height: 390, initialX: () => Math.max(8, window.innerWidth - 368), initialY: 72, minWidth: 270, minHeight: 190, initialOpen: window.innerWidth > 760 && !['battle', 'finished'].includes(room.phase), initialDockEdge: 'right' });
-  // En tablet/móvil, Turnos empieza acoplado para no cubrir el chat ni los controles de sala.
+  const floating = useFloatingWindow({ width: 350, height: 390, initialX: () => window.innerWidth - 368, initialY: 72, minWidth: 270, minHeight: 190, initialOpen: !['battle', 'finished'].includes(room.phase), initialDockEdge: 'right' });
   useEffect(() => {
-    function keepWindowsSeparated() {
-      if (window.innerWidth <= 760 && floating.open) floating.hide('right');
-    }
-    window.addEventListener('resize', keepWindowsSeparated);
-    return () => window.removeEventListener('resize', keepWindowsSeparated);
-  }, [floating.open]);
-  useEffect(() => {
-    const toggle = () => { if (floating.open) floating.hide('right'); else floating.show(); };
+    const toggle = () => { if (floating.open) floating.hide(); else floating.show(); };
     window.addEventListener('dexorium:toggle-log', toggle);
     return () => window.removeEventListener('dexorium:toggle-log', toggle);
   }, [floating.open, floating.hide, floating.show]);
@@ -340,7 +333,7 @@ function BattleSidebar({ room }) {
       {floating.open ? <>
         <header className="floating-window-titlebar">
           <div className="floating-drag-handle" onPointerDown={floating.beginDrag} title="Arrastra desde cualquier parte de esta barra para mover la ventana"><span>⠿</span><b>Turnos y acciones</b><small>mover</small></div>
-          <button type="button" className="floating-window-minimize" onClick={() => floating.hide('right')} aria-label="Ocultar ventana de combate" title="Ocultar y acoplar al borde">—</button>
+          <button type="button" className="floating-window-minimize" onClick={floating.hide} aria-label="Ocultar ventana de combate" title="Ocultar y acoplar al borde">—</button>
         </header>
         <div className="battle-sidebar-content">
           <section className={`battle-info-box ${minimized.combat ? 'section-is-minimized' : ''}`}>
@@ -378,7 +371,7 @@ function BattleSidebar({ room }) {
 }
 
 function ChatWindow({ room, send }) {
-  const floating = useFloatingWindow({ width: 350, height: 430, initialX: 8, initialY: 132, minWidth: 285, minHeight: 230, initialOpen: window.innerWidth > 760 && !['battle', 'finished'].includes(room.phase), initialDockEdge: 'left' });
+  const floating = useFloatingWindow({ width: 350, height: 430, initialX: 8, initialY: 132, minWidth: 285, minHeight: 230, initialOpen: !['battle', 'finished'].includes(room.phase), initialDockEdge: 'left' });
   const previousPhaseRef = useRef(room.phase);
   const chatWindowStyle = floating.open
     ? { top: '132px', left: '8px', width: 'min(350px, calc(100vw - 16px))', height: 'min(430px, calc(100vh - 150px))' }
@@ -388,12 +381,12 @@ function ChatWindow({ room, send }) {
   useEffect(() => {
     const wasPreparing = !['battle', 'finished'].includes(previousPhaseRef.current);
     const isInCombat = ['battle', 'finished'].includes(room.phase);
-    if (wasPreparing && isInCombat && floating.open) floating.hide('left');
+    if (wasPreparing && isInCombat && floating.open) floating.hide();
     previousPhaseRef.current = room.phase;
   }, [room.phase]);
 
   useEffect(() => {
-    const toggle = () => { if (floating.open) floating.hide('left'); else floating.show(); };
+    const toggle = () => { if (floating.open) floating.hide(); else floating.show(); };
     window.addEventListener('dexorium:toggle-chat', toggle);
     return () => window.removeEventListener('dexorium:toggle-chat', toggle);
   }, [floating.open, floating.hide, floating.show]);
@@ -429,7 +422,7 @@ function ChatWindow({ room, send }) {
       {floating.open ? <>
         <header className="floating-window-titlebar chat-window-titlebar chat-fixed-titlebar">
           <div className="chat-fixed-heading"><span aria-hidden="true">💬</span><b>Chat de la sala</b><small>en vivo</small></div>
-          <button type="button" className="floating-window-minimize" onClick={() => floating.hide('left')} aria-label="Minimizar chat" title="Minimizar chat al borde">—</button>
+          <button type="button" className="floating-window-minimize" onClick={floating.hide} aria-label="Minimizar chat" title="Minimizar chat al borde">—</button>
         </header>
         <ChatMessages room={room} />
         {chatError && <p className="error-banner chat-error-banner" role="alert">{chatError}</p>}
@@ -812,7 +805,7 @@ function SpectatorScreen({ room, onLeave, send }) {
         <div className="spectator-pokemon-name">{pretty(pokemon.name)}</div>
         {pokemon.transformation?.label && <small className="spectator-form-label">{pokemon.transformation.label}</small>}
         {!alive && <small className="spectator-fainted-label">Debilitado · esperando cambio</small>}
-        <div className="spectator-hp-track"><span style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / Math.max(1, pokemon.battleStats?.hp || 1) * 100))}%` }} /></div>
+        <div className="spectator-hp-track"><span className={getHealthBarClass(pokemon.currentHp, pokemon.battleStats?.hp || 1)} style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / Math.max(1, pokemon.battleStats?.hp || 1) * 100))}%` }} /></div>
         <div className="spectator-vitals"><span>{Math.max(0, pokemon.currentHp)} / {pokemon.battleStats?.hp || 0} HP</span><span>⚡ {pokemon.energy ?? 0}</span></div>
         {pokemon.shield > 0 && <small className="spectator-shield">Escudo {pokemon.shield}</small>}
         <div className="spectator-bench" aria-label={`Equipo completo de ${player.name}`}>
@@ -852,17 +845,10 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [selectedSupportTarget, setSelectedSupportTarget] = useState(null);
   const [switchOpen, setSwitchOpen] = useState(false);
-  const [switchPickerPresentation, setSwitchPickerPresentation] = useState('inline');
   const [selectedAction, setSelectedAction] = useState(null);
-  // Impide enviar dos acciones por doble clic/tecla antes de que llegue la respuesta del servidor.
-  const submittedTurnRef = useRef(null);
   const [transformPickerOpen, setTransformPickerOpen] = useState(false);
-  // El atajo abre una ventana modal; el botón mantiene el selector dentro del panel de combate.
-  const [transformPickerPresentation, setTransformPickerPresentation] = useState('inline');
   const [selectedTransformKey, setSelectedTransformKey] = useState(null);
   const [teraPickerOpen, setTeraPickerOpen] = useState(false);
-  // El teclado abre Tera como ventana emergente; el botón conserva el selector dentro del panel de combate.
-  const [teraPickerPresentation, setTeraPickerPresentation] = useState('inline');
   const [selectedTeraType, setSelectedTeraType] = useState('');
   const [showHotkeys, setShowHotkeys] = useState(false);
   const [capturingHotkey, setCapturingHotkey] = useState('');
@@ -923,14 +909,8 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   const teraTypeLabels = { normal: 'Normal', fire: 'Fuego', water: 'Agua', electric: 'Eléctrico', grass: 'Planta', ice: 'Hielo', fighting: 'Lucha', poison: 'Veneno', ground: 'Tierra', flying: 'Volador', psychic: 'Psíquico', bug: 'Bicho', rock: 'Roca', ghost: 'Fantasma', dragon: 'Dragón', dark: 'Siniestro', steel: 'Acero', fairy: 'Hada' };
   const transformOptions = active ? getTransformationOptions(active, me?.team || [], teamTransformationUsage) : [];
   const selectedTransform = transformOptions.find((option) => option.key === selectedTransformKey) || null;
-  const switchOptions = (me?.team || []).filter((pokemon) => pokemon.currentHp > 0 && Number(pokemon.id) !== Number(active?.id));
   const hasSubmitted = room.pendingPlayerIds?.includes(playerId);
   const waitingSwitch = room.waitingForSwitchIds?.includes(playerId);
-
-  useEffect(() => {
-    if (hasSubmitted) submittedTurnRef.current = String(room.turn);
-    else if (submittedTurnRef.current === String(room.turn)) submittedTurnRef.current = null;
-  }, [room, hasSubmitted, room.turn]);
 
   useEffect(() => {
     if (selectedTransformKey && !transformOptions.some((option) => option.key === selectedTransformKey)) {
@@ -964,7 +944,6 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
     if (hasSubmitted) {
       setSwitchOpen(false);
       setTransformPickerOpen(false);
-      setTeraPickerOpen(false);
     }
     if (!hasSubmitted) setSelectedAction(null);
   }, [hasSubmitted, room.turn]);
@@ -977,43 +956,8 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
     setSelectedTeraType('');
   }, [room.turn, active?.id, active?.transformed]);
 
-  function toggleSwitchPicker(presentation) {
-    if (!active || hasSubmitted || waitingSwitch || active.currentHp <= 0 || switchOptions.length === 0 || submittedTurnRef.current === String(room.turn)) return;
-    const samePresentation = switchPickerPresentation === presentation;
-    const nextOpen = !(switchOpen && samePresentation);
-    setSwitchPickerPresentation(presentation);
-    setSwitchOpen(nextOpen);
-    setTeraPickerOpen(false);
-    setSelectedTeraType('');
-    setTransformPickerOpen(false);
-    setSelectedTransformKey(null);
-  }
-
-  function toggleTransformPicker(presentation) {
-    if (!active || hasSubmitted || waitingSwitch || active.currentHp <= 0 || transformOptions.length === 0 || submittedTurnRef.current === String(room.turn)) return;
-    const samePresentation = transformPickerPresentation === presentation;
-    const nextOpen = !(transformPickerOpen && samePresentation);
-    setTransformPickerPresentation(presentation);
-    setTransformPickerOpen(nextOpen);
-    setSwitchOpen(false);
-    setTeraPickerOpen(false);
-    setSelectedTeraType('');
-  }
-
-  function toggleTeraPicker(presentation) {
-    if (!active || hasSubmitted || waitingSwitch || active.currentHp <= 0 || teamTeraUsed || active.teraType || active.transformed || active.transformationUsed || submittedTurnRef.current === String(room.turn)) return;
-    const samePresentation = teraPickerPresentation === presentation;
-    const nextOpen = !(teraPickerOpen && samePresentation);
-    setTeraPickerPresentation(presentation);
-    setTeraPickerOpen(nextOpen);
-    if (!nextOpen) setSelectedTeraType('');
-    setSwitchOpen(false);
-    setTransformPickerOpen(false);
-    setSelectedTransformKey(null);
-  }
-
   function play(action) {
-    if (!active || hasSubmitted || waitingSwitch || active.currentHp <= 0 || submittedTurnRef.current === String(room.turn)) return;
+    if (!active || hasSubmitted || waitingSwitch || active.currentHp <= 0) return;
     const payload = { type: 'PLAY_ACTION', action, pokemonId: active.id, turn: room.turn };
     if (action === 'tera') {
       if (!selectedTeraType || teamTeraUsed || active.teraType) return;
@@ -1030,7 +974,6 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
       payload.targetPokemonId = selectedSupportTarget?.pokemonId || active.id;
     }
     if (send(payload)) {
-      submittedTurnRef.current = String(room.turn);
       const actionName = action === 'attack' ? active.actions.attack.name : action === 'teraStrike' ? active.actions.teraStrike?.name || 'Tera Golpe' : action === 'tera' ? `Teracristalización ${selectedTeraType}` : action === 'defend' ? active.actions.defend.name : action === 'heal' ? active.actions.heal.name : action === 'recover' ? active.actions.recover.name : 'Cambio';
       setSelectedAction(selectedTransform ? `${selectedTransform.label} + ${actionName}` : actionName);
       setSelectedTransformKey(null);
@@ -1040,10 +983,8 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
   }
 
   function voluntarySwitch(id) {
-    const candidate = switchOptions.find((pokemon) => Number(pokemon.id) === Number(id) && pokemon.currentHp > 0);
-    if (!active || hasSubmitted || waitingSwitch || !candidate || Number(id) === Number(active.id) || submittedTurnRef.current === String(room.turn)) return;
+    if (!active || hasSubmitted || waitingSwitch || Number(id) === Number(active.id)) return;
     if (send({ type: 'PLAY_ACTION', action: 'switch', pokemonId: active.id, switchPokemonId: Number(id), turn: room.turn })) {
-      submittedTurnRef.current = String(room.turn);
       setSelectedAction('Cambio de Pokémon');
       setSelectedTransformKey(null);
       setTransformPickerOpen(false);
@@ -1070,25 +1011,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
         }
         return;
       }
-      if (event.key === 'Escape') {
-        if (switchOpen || teraPickerOpen || transformPickerOpen) {
-          event.preventDefault();
-          setSwitchOpen(false);
-          setTeraPickerOpen(false);
-          setSelectedTeraType('');
-          setTransformPickerOpen(false);
-          return;
-        }
-        if (showHotkeys) { setShowHotkeys(false); setCapturingHotkey(''); return; }
-      }
       if (showHotkeys || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
-      // Con el selector de transformación abierto, 1-9 eligen directamente una opción.
-      if (transformPickerOpen && transformPickerPresentation === 'popup' && /^[0-9]$/.test(event.key)) {
-        const optionIndex = event.key === '0' ? 9 : Number(event.key) - 1;
-        const option = transformOptions[optionIndex];
-        if (option) { event.preventDefault(); setSelectedTransformKey(option.key); setTransformPickerOpen(false); }
-        return;
-      }
       const target = event.target;
       if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
       const key = event.key.toLowerCase();
@@ -1098,17 +1021,17 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
         if (action === 'teraStrike' && !active?.actions?.teraStrike) return;
         event.preventDefault();
         play(action);
-      } else if (action === 'switch' && !hasSubmitted && !waitingSwitch && active && switchOptions.length > 0) {
-        event.preventDefault(); toggleSwitchPicker('popup');
+      } else if (action === 'switch' && !hasSubmitted && !waitingSwitch && active) {
+        event.preventDefault(); setSwitchOpen((value) => !value); setTransformPickerOpen(false); setTeraPickerOpen(false);
       } else if (action === 'transform' && !hasSubmitted && !waitingSwitch && transformOptions.length) {
-        event.preventDefault(); toggleTransformPicker('popup');
-      } else if (action === 'tera' && !hasSubmitted && !waitingSwitch && active && !active.teraType && !teamTeraUsed && !active.transformed && !active.transformationUsed) {
-        event.preventDefault(); toggleTeraPicker('popup');
+        event.preventDefault(); setTransformPickerOpen((value) => !value); setSwitchOpen(false); setTeraPickerOpen(false);
+      } else if (action === 'tera' && !hasSubmitted && !waitingSwitch && active && !active.teraType && !teamTeraUsed) {
+        event.preventDefault(); setTeraPickerOpen((value) => !value); setSwitchOpen(false); setTransformPickerOpen(false);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [capturingHotkey, showHotkeys, hotkeys, play, hasSubmitted, waitingSwitch, active, transformOptions, transformPickerOpen, transformPickerPresentation, switchOpen, teraPickerOpen, teamTeraUsed, switchOptions, toggleSwitchPicker, toggleTransformPicker, toggleTeraPicker]);
+  }, [capturingHotkey, showHotkeys, hotkeys, play, hasSubmitted, waitingSwitch, active, transformOptions, teamTeraUsed]);
 
   const targetPlayer = selectedTarget ? room.players.find((player) => player.id === selectedTarget.playerId) : null;
   const target = targetPlayer?.team.find((pokemon) => Number(pokemon.id) === Number(selectedTarget?.pokemonId));
@@ -1145,7 +1068,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
           {!isAliveActive && <span className="target-purpose target-purpose-fainted">Debilitado · esperando cambio</span>}
           {pokemon.transformed && <span className={`transformation-badge badge-${pokemon.transformation?.method || 'special'}`}>{pokemon.transformation?.label || 'Transformado'}</span>}
           <img src={pokemon.sprite || '/pokemon-placeholder.svg'} alt={pokemon.name} onError={(event) => handlePokemonSpriteError(event, pokemon.baseSprite)} />
-          <div className="fighter-hp"><span style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} /></div>
+          <div className="fighter-hp"><span className={getHealthBarClass(pokemon.currentHp, pokemon.battleStats.hp)} style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} /></div>
           <small>{Math.max(0, pokemon.currentHp)} / {pokemon.battleStats.hp} HP · Energía {pokemon.energy}</small>
           {pokemon.shield > 0 && <small className="fighter-shield">Escudo {pokemon.shield}</small>}
         </button>
@@ -1281,29 +1204,28 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
                 <b>Recargar energía <kbd>{hotkeys.recover.toUpperCase()}</kbd></b>
                 <span>+{active?.actions.recover?.gain || 35} energía · regeneración adicional al final del turno</span>
               </button>
-              <button className="battle-action switch" disabled={!active || hasSubmitted || waitingSwitch || switchOptions.length === 0 || submittedTurnRef.current === String(room.turn)} onClick={() => toggleSwitchPicker('inline')} type="button">
+              <button className="battle-action switch" disabled={!active || hasSubmitted || waitingSwitch} onClick={() => { setSelectedTransformKey(null); setTransformPickerOpen(false); setSwitchOpen((value) => !value); }} type="button">
                 <b>Cambiar <kbd>{hotkeys.switch.toUpperCase()}</kbd></b>
                 <span>Elige otro Pokémon de tu equipo</span>
               </button>
               {transformOptions.length > 0 && (
-                <button className="battle-action transform" disabled={!active || hasSubmitted || waitingSwitch} onClick={() => toggleTransformPicker('inline')} type="button">
+                <button className="battle-action transform" disabled={!active || hasSubmitted || waitingSwitch} onClick={() => { setSwitchOpen(false); setTeraPickerOpen(false); setTransformPickerOpen((value) => !value); }} type="button">
                   <b>Transformación <kbd>{hotkeys.transform.toUpperCase()}</kbd></b>
                   <span>Elegir una forma ({transformOptions.length}) antes de actuar</span>
                 </button>
               )}
-              <button className="battle-action terastallize" disabled={!active || hasSubmitted || waitingSwitch || teamTeraUsed || Boolean(active?.teraType) || Boolean(active?.transformed || active?.transformationUsed) || submittedTurnRef.current === String(room.turn)} onClick={() => toggleTeraPicker('inline')} type="button">
+              <button className="battle-action terastallize" disabled={!active || hasSubmitted || waitingSwitch || teamTeraUsed || Boolean(active?.teraType) || Boolean(active?.transformed || active?.transformationUsed)} onClick={() => { setSwitchOpen(false); setTransformPickerOpen(false); setSelectedTransformKey(null); setTeraPickerOpen((value) => !value); }} type="button">
                 <b>{active?.teraType ? `Tipo Tera: ${active.teraType}` : active?.transformed || active?.transformationUsed ? 'Mecánica especial usada' : <>Teracristalizar <kbd>{hotkeys.tera.toUpperCase()}</kbd></>}</b>
                 <span>{teamTeraUsed ? 'El equipo ya usó su Tera' : active?.teraType ? 'El tipo queda fijo este combate' : active?.transformed || active?.transformationUsed ? 'Este Pokémon no puede usar otra mecánica especial' : 'Elige uno de los 18 tipos'}</span>
               </button>
             </div>
 
             {teraPickerOpen && active && !hasSubmitted && !teamTeraUsed && !active.teraType && !active.transformed && !active.transformationUsed && (
-              <div className={teraPickerPresentation === 'popup' ? 'tera-keyboard-overlay' : 'tera-inline-container'} onMouseDown={(event) => { if (event.target === event.currentTarget && teraPickerPresentation === 'popup') { setTeraPickerOpen(false); setSelectedTeraType(''); } }}>
-              <div className="tera-type-picker tera-picker-redesign" role="dialog" aria-modal={teraPickerPresentation === 'popup' ? 'true' : undefined} aria-label="Elegir tipo de teracristalización">
+              <div className="tera-type-picker tera-picker-redesign" role="dialog" aria-label="Elegir tipo de teracristalización">
                 <div className="tera-picker-heading">
                   <div className="tera-heading-symbol" aria-hidden="true">✦</div>
                   <div className="tera-heading-copy"><span className="tera-eyebrow">CRISTAL TERA</span><h3>Elige tu tipo Tera</h3><p>El tipo elegido cambiará a tu Pokémon y habilitará Tera Golpe durante el resto del combate.</p></div>
-                  <button className="tera-close-button" type="button" onClick={() => { setTeraPickerOpen(false); setSelectedTeraType(''); }} aria-label="Cerrar selector Tera">×</button>
+                  <button className="tera-close-button" type="button" onClick={() => setTeraPickerOpen(false)} aria-label="Cerrar selector Tera">×</button>
                 </div>
                 <div className="tera-selection-preview">
                   <span className={`tera-preview-gem tera-color-${selectedTeraType || 'normal'}`} aria-hidden="true">✦</span>
@@ -1311,44 +1233,24 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
                   <span className={`tera-preview-tag ${selectedTeraType ? `tera-color-${selectedTeraType}` : ''}`}>{selectedTeraType ? teraTypeLabels[selectedTeraType] : 'Sin elegir'}</span>
                 </div>
                 <div className="tera-type-grid">{teraTypes.map((type) => <button key={type} type="button" aria-pressed={selectedTeraType === type} className={`tera-type-chip tera-color-${type} ${selectedTeraType === type ? 'selected' : ''}`} onClick={() => setSelectedTeraType(type)}><span className="tera-chip-symbol" aria-hidden="true">✦</span><span className="tera-chip-label">{teraTypeLabels[type]}</span><small>{type.toUpperCase()}</small></button>)}</div>
-                <div className="tera-picker-footer"><span>Solo puedes teracristalizar una vez por equipo.</span><button className="primary-button" type="button" disabled={!selectedTeraType || hasSubmitted || waitingSwitch || submittedTurnRef.current === String(room.turn)} onClick={() => play('tera')}>{selectedTeraType ? `Activar Tera ${teraTypeLabels[selectedTeraType]}` : 'Selecciona un tipo'}</button></div>
-              </div>
+                <div className="tera-picker-footer"><span>Solo puedes teracristalizar una vez por equipo.</span><button className="primary-button" type="button" disabled={!selectedTeraType} onClick={() => play('tera')}>{selectedTeraType ? `Activar Tera ${teraTypeLabels[selectedTeraType]}` : 'Selecciona un tipo'}</button></div>
               </div>
             )}
 
             {transformPickerOpen && active && !hasSubmitted && transformOptions.length > 0 && (
-              <div
-                className={transformPickerPresentation === 'popup' ? 'transform-keyboard-overlay' : 'transform-inline-container'}
-                onMouseDown={(event) => {
-                  if (event.target === event.currentTarget && transformPickerPresentation === 'popup') setTransformPickerOpen(false);
-                }}
-              >
-                <div className={`transformation-picker ${transformPickerPresentation === 'popup' ? 'is-popup' : 'is-inline'}`} role="dialog" aria-modal={transformPickerPresentation === 'popup' ? 'true' : undefined} aria-label="Elegir transformación">
-                  <div className="transformation-picker-head">
-                    <div className="transformation-heading-copy">
-                      <span className="transformation-eyebrow">FORMAS DE COMBATE</span>
-                      <strong>Elige una transformación</strong>
-                      <span>{transformPickerPresentation === 'popup' ? 'Pulsa un número o haz clic en una tarjeta. La transformación se aplicará con tu próxima acción.' : 'Selecciona la forma que quieras preparar; se aplicará con tu próxima acción.'}</span>
-                      <small className="transformation-resource-status">Dinamax: {teamTransformationUsage.dynamaxUsed ? 'ya usado por el equipo' : 'disponible'} · Gigamax: {teamTransformationUsage.gigantamaxUsed ? 'ya usado por el equipo' : 'disponible'}</small>
-                    </div>
-                    <button type="button" className={transformPickerPresentation === 'popup' ? 'transformation-close-button' : 'ghost-button transformation-inline-close'} onClick={() => setTransformPickerOpen(false)} aria-label="Cerrar selector de transformaciones">{transformPickerPresentation === 'popup' ? '×' : 'Cerrar'}</button>
-                  </div>
-                  <div className="transformation-options">
-                    {transformOptions.map((option, index) => (
-                      <button key={option.key} type="button" className={`transformation-option ${selectedTransformKey === option.key ? 'selected' : ''}`} onClick={() => { setSelectedTransformKey(option.key); setTransformPickerOpen(false); }}>
-                        <span className="transformation-number" aria-hidden="true">{index < 9 ? index + 1 : index === 9 ? 0 : '·'}</span>
-                        <span className={`transformation-orb orb-${option.method}`} aria-hidden="true">{option.method === 'mega' ? '◆' : option.method === 'dynamax' || option.method === 'gigantamax' ? '●' : '✦'}</span>
-                        <span className="transformation-option-copy"><b>{option.label}</b><small>{option.method === 'mega' ? 'Mega evolución' : option.method === 'dynamax' ? 'Dinamax' : option.method === 'gigantamax' ? 'Gigamax' : 'Forma especial'}</small></span>
-                        <span className="transformation-select-mark">{index < 10 ? `Tecla ${index === 9 ? 0 : index + 1}` : 'Elegir'} <span aria-hidden="true">›</span></span>
-                      </button>
-                    ))}
-                  </div>
-                  {transformPickerPresentation === 'popup' && (
-                    <div className="transformation-picker-footer">
-                      <span>Se prepara ahora y se aplica al ejecutar tu próxima acción.</span>
-                      <button type="button" className="secondary-button" onClick={() => setTransformPickerOpen(false)}>Cancelar</button>
-                    </div>
-                  )}
+              <div className="transformation-picker" role="dialog" aria-label="Elegir transformación">
+                <div className="transformation-picker-head">
+                  <div><strong>Elige una transformación</strong><span>Se aplica junto con la próxima acción y no puede revertirse durante este combate.</span><small className="transformation-resource-status">Dinamax del equipo: {teamTransformationUsage.dynamaxUsed ? 'ya usado' : 'disponible'} · Gigamax del equipo: {teamTransformationUsage.gigantamaxUsed ? 'ya usado' : 'disponible'}</small></div>
+                  <button type="button" className="ghost-button" onClick={() => setTransformPickerOpen(false)}>Cerrar</button>
+                </div>
+                <div className="transformation-options">
+                  {transformOptions.map((option) => (
+                    <button key={option.key} type="button" className={`transformation-option ${selectedTransformKey === option.key ? 'selected' : ''}`} onClick={() => { setSelectedTransformKey(option.key); setTransformPickerOpen(false); }}>
+                      <span className={`transformation-orb orb-${option.method}`}>{option.method === 'mega' ? '◆' : option.method === 'dynamax' || option.method === 'gigantamax' ? '●' : '✦'}</span>
+                      <span><b>{option.label}</b><small>{option.method === 'mega' ? 'Mega evolución' : option.method === 'dynamax' ? 'Dinamax' : option.method === 'gigantamax' ? 'Gigamax' : 'Forma especial'}</small></span>
+                      <span className="transformation-select-mark">Elegir</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -1371,26 +1273,16 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
               </div>
             )}
 
-            {switchOpen && active && !hasSubmitted && !waitingSwitch && switchOptions.length > 0 && (
-              <div
-                className={switchPickerPresentation === 'popup' ? 'switch-keyboard-overlay' : 'switch-inline-container'}
-                onMouseDown={(event) => { if (event.target === event.currentTarget && switchPickerPresentation === 'popup') setSwitchOpen(false); }}
-              >
-                <div className={`switch-menu switch-picker-card ${switchPickerPresentation === 'popup' ? 'is-popup' : 'is-inline'}`} role="dialog" aria-modal={switchPickerPresentation === 'popup' ? 'true' : undefined} aria-label="Elegir Pokémon para cambiar">
-                  <div className="switch-picker-heading">
-                    <div><span className="switch-picker-eyebrow">CAMBIO DE EQUIPO</span><strong>¿Qué Pokémon entra al combate?</strong><small>Elige uno de tus compañeros disponibles para seguir combatiendo.</small></div>
-                    <button className="switch-picker-close" type="button" onClick={() => setSwitchOpen(false)} aria-label="Cerrar selector de cambio">×</button>
-                  </div>
-                  <div className="switch-picker-grid">
-                    {switchOptions.map((pokemon) => (
-                      <button key={pokemon.id} type="button" onClick={() => voluntarySwitch(pokemon.id)} disabled={pokemon.currentHp <= 0 || submittedTurnRef.current === String(room.turn)}>
-                        <img src={pokemon.sprite || '/pokemon-placeholder.svg'} alt={pokemon.name} onError={(event) => handlePokemonSpriteError(event, pokemon.baseSprite)} />
-                        <span className="switch-picker-copy"><b>{pretty(pokemon.name)}</b><small>{Math.max(0, pokemon.currentHp)} / {pokemon.battleStats.hp} PS · Energía {pokemon.energy}</small><i className="switch-picker-hp"><span style={{ width: `${Math.max(0, Math.min(100, pokemon.currentHp / pokemon.battleStats.hp * 100))}%` }} /></i></span>
-                        <span className="switch-picker-choose">Elegir</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="switch-picker-footer"><span>El cambio ocupa tu acción de este turno.</span><button type="button" className="secondary-button" onClick={() => setSwitchOpen(false)}>Cancelar</button></div>
+            {switchOpen && active && !hasSubmitted && (
+              <div className="switch-menu">
+                <strong>Elegir cambio</strong>
+                <div>
+                  {me?.team.filter((pokemon) => pokemon.currentHp > 0 && pokemon.id !== active.id).map((pokemon) => (
+                    <button key={pokemon.id} type="button" onClick={() => voluntarySwitch(pokemon.id)}>
+                      <img src={pokemon.sprite || '/pokemon-placeholder.svg'} alt={pokemon.name} onError={(event) => handlePokemonSpriteError(event, pokemon.baseSprite)} />
+                      <span>{pretty(pokemon.name)}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -1811,6 +1703,10 @@ function ArenaApp() {
       {!['battle', 'spectator'].includes(screen) && <button className="global-hotkeys-trigger" type="button" onClick={() => setShowGlobalHotkeys(true)} aria-haspopup="dialog">⌨ <span>Configurar teclas</span></button>}
       {showGlobalHotkeys && <HotkeySettingsModal onClose={() => setShowGlobalHotkeys(false)} />}
       {showHowToPlay && <HowToPlay onClose={() => setShowHowToPlay(false)} />}
+      <div className="studio-credit" aria-label="Créditos de Grillo Studio">
+        <img src="/brand/grillo-signature.png" alt="Firma de Grillo Studio" />
+        <span>By: Grillo_Studio´s</span>
+      </div>
     </div>
   );
 }

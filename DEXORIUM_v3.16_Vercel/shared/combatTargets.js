@@ -17,3 +17,16 @@ export function validateTargetForAction(actionId, actorPlayer, targetPlayer, tar
   }
   return true;
 }
+
+
+// Durante el turno el rival puede cambiar de Pokémon.
+// Para un ataque usamos el activo actual al resolver el daño; para curar/proteger
+// respetamos el Pokémon que el jugador eligió en la interfaz.
+export function getResolvedTargetPokemon(actionId, targetPlayer, selectedPokemon = null) {
+  if (!targetPlayer) return null;
+  if (actionId !== 'attack') return selectedPokemon;
+
+  return (targetPlayer.team || []).find(
+    (pokemon) => Number(pokemon.id) === Number(targetPlayer.activeId)
+  ) || null;
+}
