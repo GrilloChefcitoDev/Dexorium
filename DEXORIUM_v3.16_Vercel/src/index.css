@@ -2245,3 +2245,7 @@ p { color: var(--muted); line-height: 1.6; }
 .spectator-hp-track span.hp-critical {
   background: linear-gradient(90deg, #d92f43, #ff625e);
 }
+
+
+/* Aviso discreto: la selección ya está disponible mientras PokeAPI se actualiza. */
+.catalog-status { max-width: 1450px; margin: 0 auto 12px; padding: 9px 14px; border: 1px solid rgba(250,224,23,.22); border-radius: 10px; background: rgba(250,224,23,.07); color: #f5d94d; font-size: .9rem; }

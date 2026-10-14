@@ -12,6 +12,7 @@ import { AudioProvider, useArenaAudio } from './audio/AudioManager';
 import { chooseUniquePokemonIds, recordMatchResultOnce, validateChatMessage } from '../shared/partialRules.js';
 import { getFaintedPokemonCount, getWinnerTrainerLabel } from '../shared/spectatorScore.js';
 import { getHealthBarClass } from '../shared/healthBar.js';
+import { makeOfflineCatalog } from '../shared/offlinePokemon.js';
 
 const STATS_STORAGE_KEY = 'pokemon-arena-results';
 
@@ -1318,7 +1319,8 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
 function ArenaApp() {
   const { playPokemonCry, playSelection, setScene } = useArenaAudio();
   const [screen, setScreen] = useState('intro');
-  const [catalog, setCatalog] = useState({ count: 0, results: [] });
+  // La galería arranca con el catálogo local; internet solo mejora los datos en segundo plano.
+  const [catalog, setCatalog] = useState(() => ({ ...makeOfflineCatalog(), offline: true, source: 'local-inicial' }));
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState('');
   const [catalogRetry, setCatalogRetry] = useState(0);
@@ -1365,7 +1367,7 @@ function ArenaApp() {
 
   useEffect(() => {
     if (screen !== 'team' && screen !== 'rematch_team') return;
-    if (catalog.results.length && catalogRetry === 0) return;
+    if (catalog.results.length && catalogRetry === 0 && catalog.source !== 'local-inicial') return;
     if (catalogRetry > 0 && lastCatalogRetryStartedRef.current === catalogRetry && catalog.results.length) return;
     if (catalogRetry > 0) lastCatalogRetryStartedRef.current = catalogRetry;
     let cancelled = false;
@@ -1618,9 +1620,9 @@ function ArenaApp() {
             </div>
           </div>
           {showStatsModal && <ResultsPanel stats={stats} onClose={() => setShowStatsModal(false)} />}
-          {catalogLoading && <div className="loading-overlay">Cargando catálogo de PokeAPI...</div>}
+          {catalogLoading && <div className="catalog-status" role="status">⚡ Catálogo listo con datos locales. Actualizando datos de PokeAPI en segundo plano…</div>}
           {catalogError && <div className="error-banner" role="alert">{catalogError} <button type="button" className="secondary-button" onClick={() => setCatalogRetry((value) => value + 1)}>Reintentar carga</button></div>}
-          {!catalogLoading && (
+          {(
             <TeamBuilder
               catalog={catalog}
               selectedTeam={selectedTeam}

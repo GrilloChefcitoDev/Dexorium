@@ -9,7 +9,7 @@ const DETAILS_STORAGE_KEY = 'dexorium-pokemon-details-cache-v2';
 const DETAIL_CACHE_LIMIT = 220;
 const TYPE_CATALOG_STORAGE_KEY = 'dexorium-pokemon-type-cache-v1';
 const typeCatalogCache = new Map();
-const REQUEST_TIMEOUT_MS = 3200;
+const REQUEST_TIMEOUT_MS = 8000;
 const OFFLINE_COOLDOWN_MS = 30_000;
 
 let catalogCache = null;
@@ -133,7 +133,7 @@ async function requestJson(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { cache: 'no-cache', signal: controller.signal });
+    const response = await fetch(url, { cache: 'force-cache', signal: controller.signal });
     if (!response.ok) throw new Error(`PokeAPI respondió ${response.status}`);
     return await response.json();
   } catch (error) {
