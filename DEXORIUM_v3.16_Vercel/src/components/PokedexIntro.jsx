@@ -82,10 +82,6 @@ export default function PokedexIntro({ onContinue, onOpenGuide, onPokemonCry }) 
               </>
             )}
           </div>
-          <div className="dpad" aria-hidden="true">
-            <span className="dpad-v" />
-            <span className="dpad-h" />
-          </div>
         </div>
 
         <div className="pokedex-3d__hinge" aria-hidden="true">

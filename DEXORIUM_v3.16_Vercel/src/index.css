@@ -2386,3 +2386,80 @@ input, select, textarea { min-width: 0; }
   .catalog-grid, .pokemon-grid { gap: 6px; }
   .page-toolbar-actions { grid-template-columns: minmax(0, 1fr); }
 }
+
+
+/* Ajustes solicitados: sprite visible, sin cruceta decorativa y ventanas emergentes restauradas. */
+.pokedex-3d { cursor: default; }
+.pokedex-screen { gap: clamp(4px, 1vh, 12px); }
+.pokedex-screen img,
+.pokedex-screen .pokedex-pokemon-sprite {
+  width: clamp(150px, 18vw, 230px);
+  height: clamp(140px, 20vh, 205px);
+  max-width: 90%;
+  object-fit: contain;
+  flex: 0 1 auto;
+}
+.dex-screen-header { width: 100%; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.dex-screen-header strong { font-size: clamp(12px, 1.2vw, 17px); }
+.dex-screen-header span { font-size: clamp(14px, 1.6vw, 22px); overflow-wrap:anywhere; }
+.dpad { display:none !important; }
+.spectator-fighter-card > img {
+  height: clamp(110px, 18vh, 180px);
+  width: 100%;
+  object-fit: contain;
+  image-rendering: auto;
+}
+.spectator-pokemon-name { font-size: clamp(13px, 1vw, 17px); }
+.spectator-bench span { font-size: clamp(9px, .75vw, 11px); padding: 3px 5px; }
+.spectator-screen .showdown-brand .dexorium-logo-lockup {
+  width: clamp(150px, 13vw, 190px);
+  height: clamp(58px, 5vw, 76px);
+}
+.spectator-screen .showdown-brand .dexorium-logo-lockup img { max-width:100%; max-height:100%; object-fit:contain; }
+.transformation-picker {
+  position: fixed !important;
+  z-index: 1000 !important;
+  left: 50% !important;
+  top: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%) !important;
+  width: min(620px, calc(100vw - 28px)) !important;
+  max-height: min(82dvh, 720px);
+  overflow-y: auto;
+  box-shadow: 0 24px 80px rgba(0,0,0,.6);
+}
+.transformation-picker::before {
+  content: "";
+  position: fixed;
+  inset: -100vh -100vw;
+  background: rgba(5, 9, 16, .66);
+  backdrop-filter: blur(4px);
+  z-index: -1;
+}
+@media (max-width: 760px) {
+  .pokedex-3d { height: clamp(340px, 72vw, 430px); grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr); }
+  .pokedex-3d__left { padding: 12px; }
+  .pokedex-3d__right { padding: 22px 12px; }
+  .pokedex-screen { left: 12px; right: 12px; top: 72px; height: calc(100% - 96px); padding: 8px; border-width: 5px; }
+  .pokedex-screen img, .pokedex-screen .pokedex-pokemon-sprite { width: clamp(115px, 28vw, 180px); height: clamp(105px, 28vw, 165px); }
+  .dex-screen-header { flex-wrap:wrap; justify-content:center; }
+  .dex-screen-header span { font-size: clamp(12px, 3.4vw, 17px); }
+  .camera-light { width:38px; height:38px; left:10px; top:10px; }
+  .mini-display { height: clamp(54px, 12vw, 72px); margin-bottom:14px; }
+  .action-pad { gap:8px; }
+  .action-pad button { width: clamp(38px, 10vw, 48px); height: clamp(38px, 10vw, 48px); }
+  .spectator-fighter-card > img { height: clamp(80px, 22vw, 125px); }
+  .spectator-screen .showdown-brand .dexorium-logo-lockup { width:145px; height:55px; }
+}
+@media (max-width: 420px) {
+  .pokedex-3d { grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr); height:340px; }
+  .pokedex-3d__left,.pokedex-3d__right { border-width:3px; }
+  .pokedex-3d__hinge { padding:35px 2px; }
+  .pokedex-3d__hinge span { height:44px; }
+  .pokedex-screen { left:7px; right:7px; top:64px; height:calc(100% - 78px); }
+  .pokedex-screen img,.pokedex-screen .pokedex-pokemon-sprite { width:105px; height:105px; }
+  .spectator-field { grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr); }
+  .spectator-side-grid { grid-template-columns:1fr; }
+  .spectator-fighter-card > img { height:76px; }
+}
