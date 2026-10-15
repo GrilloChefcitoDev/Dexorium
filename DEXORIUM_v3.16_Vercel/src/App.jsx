@@ -1016,6 +1016,14 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
       const target = event.target;
       if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
       const key = event.key.toLowerCase();
+      // Con el selector abierto, los números 1–9 eligen directamente una transformación.
+      if (transformPickerOpen && /^[1-9]$/.test(key) && !hasSubmitted && !waitingSwitch) {
+        const option = transformOptions[Number(key) - 1];
+        if (option) { event.preventDefault(); setSelectedTransformKey(option.key); setTransformPickerOpen(false); }
+        return;
+      }
+      // Esc cierra los selectores emergentes sin enviar una jugada.
+      if (event.key === 'Escape') { setSwitchOpen(false); setTransformPickerOpen(false); setTeraPickerOpen(false); return; }
       const action = Object.entries(hotkeys).find(([, boundKey]) => String(boundKey).toLowerCase() === key)?.[0];
       if (!action) return;
       if (['attack', 'defend', 'heal', 'recover', 'teraStrike'].includes(action)) {
@@ -1032,7 +1040,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [capturingHotkey, showHotkeys, hotkeys, play, hasSubmitted, waitingSwitch, active, transformOptions, teamTeraUsed]);
+  }, [capturingHotkey, showHotkeys, hotkeys, play, hasSubmitted, waitingSwitch, active, transformOptions, transformPickerOpen, teamTeraUsed]);
 
   const targetPlayer = selectedTarget ? room.players.find((player) => player.id === selectedTarget.playerId) : null;
   const target = targetPlayer?.team.find((pokemon) => Number(pokemon.id) === Number(selectedTarget?.pokemonId));
@@ -1247,7 +1255,7 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
                 <div className="transformation-options">
                   {transformOptions.map((option) => (
                     <button key={option.key} type="button" className={`transformation-option ${selectedTransformKey === option.key ? 'selected' : ''}`} onClick={() => { setSelectedTransformKey(option.key); setTransformPickerOpen(false); }}>
-                      <span className={`transformation-orb orb-${option.method}`}>{option.method === 'mega' ? '◆' : option.method === 'dynamax' || option.method === 'gigantamax' ? '●' : '✦'}</span>
+                      <span className="transformation-number" aria-label={`Atajo ${transformOptions.indexOf(option) + 1}`}>{transformOptions.indexOf(option) + 1}</span><span className={`transformation-orb orb-${option.method}`}>{option.method === 'mega' ? '◆' : option.method === 'dynamax' || option.method === 'gigantamax' ? '●' : '✦'}</span>
                       <span><b>{option.label}</b><small>{option.method === 'mega' ? 'Mega evolución' : option.method === 'dynamax' ? 'Dinamax' : option.method === 'gigantamax' ? 'Gigamax' : 'Forma especial'}</small></span>
                       <span className="transformation-select-mark">Elegir</span>
                     </button>
@@ -1275,16 +1283,21 @@ function BattleScreen({ room, playerId, send, onLeave, onRequestRematch, onAccep
             )}
 
             {switchOpen && active && !hasSubmitted && (
-              <div className="switch-menu">
-                <strong>Elegir cambio</strong>
-                <div>
-                  {me?.team.filter((pokemon) => pokemon.currentHp > 0 && pokemon.id !== active.id).map((pokemon) => (
-                    <button key={pokemon.id} type="button" onClick={() => voluntarySwitch(pokemon.id)}>
-                      <img src={pokemon.sprite || '/pokemon-placeholder.svg'} alt={pokemon.name} onError={(event) => handlePokemonSpriteError(event, pokemon.baseSprite)} />
-                      <span>{pretty(pokemon.name)}</span>
-                    </button>
-                  ))}
-                </div>
+              <div className="switch-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSwitchOpen(false); }}>
+                <section className="switch-modal" role="dialog" aria-modal="true" aria-label="Cambiar Pokémon">
+                  <header className="switch-modal-heading"><div><strong>¿A qué Pokémon quieres cambiar?</strong><small>Elige un Pokémon disponible de tu equipo.</small></div><button type="button" aria-label="Cerrar selector" onClick={() => setSwitchOpen(false)}>×</button></header>
+                  <div className="switch-menu">
+                    <div>
+                      {me?.team.filter((pokemon) => pokemon.currentHp > 0 && pokemon.id !== active.id).map((pokemon) => (
+                        <button key={pokemon.id} type="button" onClick={() => voluntarySwitch(pokemon.id)}>
+                          <img src={pokemon.sprite || '/pokemon-placeholder.svg'} alt={pokemon.name} onError={(event) => handlePokemonSpriteError(event, pokemon.baseSprite)} />
+                          <span>{pretty(pokemon.name)}</span><small>{pokemon.currentHp}/{pokemon.maxHp} PS</small>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <footer className="switch-modal-footer"><span>Esc para cerrar</span><button type="button" onClick={() => setSwitchOpen(false)}>Cancelar</button></footer>
+                </section>
               </div>
             )}
 

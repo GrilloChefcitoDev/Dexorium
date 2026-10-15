@@ -2463,3 +2463,38 @@ input, select, textarea { min-width: 0; }
   .spectator-side-grid { grid-template-columns:1fr; }
   .spectator-fighter-card > img { height:76px; }
 }
+
+/* Selector emergente para cambiar Pokémon: centrado y usable en móvil. */
+.switch-modal-backdrop {
+  position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(4, 8, 15, .72); backdrop-filter: blur(5px);
+}
+.switch-modal {
+  width: min(560px, 100%); max-height: min(82dvh, 650px); overflow: auto; padding: 18px;
+  border: 1px solid rgba(110, 190, 255, .45); border-radius: 18px;
+  color: #edf5ff; background: linear-gradient(145deg, #172433, #101721);
+  box-shadow: 0 24px 80px rgba(0,0,0,.55);
+}
+.switch-modal-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:14px; }
+.switch-modal-heading strong,.switch-modal-heading small { display:block; }
+.switch-modal-heading strong { font-size: clamp(16px, 3.8vw, 21px); }
+.switch-modal-heading small { margin-top:5px; color:#aebed0; font-size:12px; }
+.switch-modal-heading > button { flex:0 0 36px; width:36px; height:36px; border:1px solid #536274; border-radius:10px; background:#263545; color:white; font-size:24px; cursor:pointer; }
+.switch-modal .switch-menu { margin:0; padding:0; border:0; background:transparent; }
+.switch-modal .switch-menu > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(145px,100%),1fr)); gap:9px; }
+.switch-modal .switch-menu button { min-width:0; min-height:76px; grid-template-columns:48px minmax(0,1fr); gap:3px 9px; padding:9px; border:1px solid #43566a; border-radius:12px; background:#202d3b; color:#f1f6fb; }
+.switch-modal .switch-menu button:hover,.switch-modal .switch-menu button:focus-visible { border-color:#65c8ff; background:#2b4053; outline:2px solid rgba(101,200,255,.2); }
+.switch-modal .switch-menu img { grid-row:span 2; width:48px; height:48px; }
+.switch-modal .switch-menu button span { align-self:end; font-weight:700; overflow-wrap:anywhere; }
+.switch-modal .switch-menu button small { align-self:start; color:#b8c8d8; font-size:10px; }
+.switch-modal-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; color:#aebed0; font-size:11px; }
+.switch-modal-footer button { padding:8px 13px; border:1px solid #526174; border-radius:9px; background:#263545; color:white; cursor:pointer; }
+.transformation-number { display:inline-flex; flex:0 0 27px; width:27px; height:27px; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,.42); border-radius:8px; color:#fff; background:linear-gradient(145deg,#7c5bce,#49358b); font-size:14px; font-weight:900; box-shadow:0 2px 7px rgba(0,0,0,.28); }
+.transformation-option { position:relative; }
+.transformation-picker-head > div > small { display:block; margin-top:5px; }
+@media(max-width:480px) {
+  .switch-modal { padding:13px; border-radius:14px; }
+  .switch-modal .switch-menu > div { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .switch-modal .switch-menu button { grid-template-columns:38px minmax(0,1fr); padding:7px; }
+  .switch-modal .switch-menu img { width:38px; height:38px; }
+}
